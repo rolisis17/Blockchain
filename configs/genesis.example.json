@@ -1,0 +1,33 @@
+{
+  "genesisTimestampMs": 1700000000000,
+  "accounts": {
+    "1c0c490f1b5528d8173c5de46d131160e4b2c0c3": 1000000,
+    "34fec43c7fcab9aef3b3cf8aba855e41ee69ca3a": 1000000,
+    "9ce17f375ef8a9009e1eccb05e9221ebe125c97e": 0,
+    "3974a766ca25e567c8cf7bf0b80037a2e2512413": 0,
+    "e87739f58aeebd94a71fe531e0716e2b8d004b2c": 0
+  },
+  "validators": [
+    {
+      "id": "v1",
+      "pubKey": "d3bfb03c5ea8aa2884363bf4d68ebd5e38059b03b8a1519b0e0f5abb627e3bd2",
+      "stake": 1000,
+      "workWeight": 100,
+      "active": true
+    },
+    {
+      "id": "v2",
+      "pubKey": "fd4e5b7347d2f3c6abd2fb5401400b7de3f3ca1d56fa5c7cf0498b204e3ebac9",
+      "stake": 1000,
+      "workWeight": 100,
+      "active": true
+    },
+    {
+      "id": "v3",
+      "pubKey": "cf17e30a16383db33ec3bc181b697d8ca3c5a8c27d7c8ad4f0e33451f3549f98",
+      "stake": 1000,
+      "workWeight": 100,
+      "active": true
+    }
+  ]
+}

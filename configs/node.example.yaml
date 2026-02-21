@@ -1,0 +1,19 @@
+http: ":8080"
+state: "./data/state.json"
+# Optional; if omitted, built-in deterministic genesis is used.
+# genesis: "./configs/genesis.example.json"
+
+blockInterval: "2s"
+baseReward: 1
+maxTxPerBlock: 500
+maxMempoolSize: 20000
+minTxFee: 1
+
+# Set for production-like runs. Can also come from FASTPOS_ADMIN_TOKEN env.
+adminToken: "change-me"
+
+# Keep false outside local development.
+allowDevSigning: false
+
+# 0 means auto: max(4 * blockInterval, 10s)
+readinessMaxLag: "0s"
