@@ -40,12 +40,17 @@ Exit criteria:
 Goal: move from single-process simulation to real validator networking.
 
 - Done (foundation): signed proposal/vote/finalize envelope primitives and protocol draft (`internal/p2p`, `docs/phase2-network-protocol.md`)
-- P2P or RPC gossip for block proposals and votes
-- Separate node identities and validator signing keys
-- Real vote aggregation from remote validators
-- Peer discovery and static peer bootstrap
-- Fork-choice and duplicate/late vote handling
-- Deterministic integration tests for 3-7 node local cluster
+- Done (initial): `POST /p2p/message` with validator registry, signature checks, strict payload validation, and duplicate/outdated detection
+- Done (initial): static peer config + proposal/vote/finalize gossip broadcast between nodes
+- Done: runtime peer management API (`GET/POST/DELETE /p2p/peers`)
+- Done (initial): local 3-node smoke harness + Docker Compose testnet (`scripts/testnet`, `docker-compose.testnet.yml`)
+- Done: real vote aggregation from remote validators into proposer finalization flow
+- Done: timeout-driven round/view-change fallback when scheduled proposer is offline
+- Done (initial): peer discovery/bootstrap from known peers via periodic `/p2p/peers` crawl
+- Done: fork-choice and duplicate/late vote handling at same height
+- Done: outbound peer health/backoff + inbound per-peer rate limiting defaults
+- Done: deterministic 3-node integration test in CI (`internal/integration/multinode_consensus_test.go`)
+- Done: deterministic 5-node partial-failure integration test with one offline validator (`internal/integration/multinode_consensus_test.go`)
 
 Exit criteria:
 
@@ -56,11 +61,12 @@ Exit criteria:
 
 Goal: stable incentives and governance for real operators.
 
-- On-chain staking transactions (bond/unbond)
-- Delegation model (optional, if needed for your tokenomics)
-- Slashing for equivocation/double-signing
-- Jailing and recovery rules
-- Epoch transitions and validator set updates
+- Done (initial): validator lifecycle primitives for bond/unbond/slash/jail are implemented in chain state + admin API
+- Done (initial): on-chain validator lifecycle transactions (`validator_bond`, `validator_unbond`, `validator_slash`, `validator_jail`) execute in consensus state transitions
+- Done (initial): on-chain delegation model (`delegation_delegate`/`delegation_undelegate`) included in effective stake and exposed via API
+- Done (initial): equivocation/double-sign evidence capture with operator-triggered slash+jail workflow
+- Done (initial): jailing recovery rule (`validator_unjail`) with minimum jail duration in blocks
+- Done (initial): epoch transitions and validator-set snapshot updates (`epochLengthBlocks`) for consensus/routing stability
 
 Exit criteria:
 
@@ -71,12 +77,12 @@ Exit criteria:
 
 Goal: be robust under realistic failures and adversarial traffic.
 
-- Persistent storage backend (Pebble/Badger/SQLite) beyond JSON snapshots
-- Mempool DoS controls, rate limiting, and size bounds
-- State sync for new nodes
-- Snapshot/backup and disaster recovery procedures
-- Threat model + external security review
-- Fuzz tests for tx/block decoding and consensus state transitions
+- Done (initial): persistent SQLite state backend beyond JSON snapshots (configurable via `stateBackend`)
+- Done (initial): mempool DoS controls and size bounds (per-account pending caps + tx age expiry)
+- Done (initial): startup state sync for new/recovering nodes via peer status + block catch-up with snapshot fallback
+- Done (initial): snapshot backup cadence + retention with restore tooling and state-backend migration command/runbook
+- Done (initial): internal threat model baseline with external review checklist (`docs/security-threat-model.md`)
+- Done (initial): fuzz tests for tx/block decoding and consensus state transitions
 
 Exit criteria:
 
@@ -87,11 +93,11 @@ Exit criteria:
 
 Goal: connect your validator product to chain economics.
 
-- Define product proof schema (what work evidence is accepted)
-- Oracle/attestation path to update validator `workWeight`
-- Reward distribution policy tied to product signals
-- Fraud/challenge flow for bad work reports
-- Billing/settlement endpoints for product users
+- Done (initial): product proof schema with on-chain `ProductProof` records and references
+- Done (initial): oracle/attestation path via `product_attest` transactions to update validator `workWeight`
+- Done (initial): treasury-backed reward distribution policy tied to product signal score at epoch transition
+- Done (initial): fraud/challenge flow via `product_challenge` and `product_resolve_challenge` transactions (slash+jail on successful challenge)
+- Done (initial): billing/settlement endpoints and transaction path for product users (`product_settle`, quote + listing APIs)
 
 Exit criteria:
 
@@ -100,9 +106,56 @@ Exit criteria:
 
 ## Proposed immediate sprint (next)
 
-1. Design Phase 2 network protocol (proposal/vote messages, peer auth, block propagation).
-2. Implement peer transport and message validation for 4 local validator nodes.
-3. Build local `docker-compose` testnet with deterministic integration tests.
+1. Done: build remote vote aggregation into block finalization flow (replace local simulated votes).
+2. Done: add peer-authenticated proposal relay + duplicate/late/conflict handling in consensus state machine.
+3. Done (initial): add deterministic multi-node integration tests in CI (3 nodes), with Docker smoke tests.
+4. Done: add runtime peer list management (`/p2p/peers`) for zero-downtime topology updates.
+5. Done: add proposer-timeout view-change fallback and deterministic offline-proposer integration coverage.
+
+## Active build queue (recommended order)
+
+1. Done: consensus liveness under proposer failure
+   Implemented proposer timeout + round/view-change so finality continues when scheduled proposer is offline.
+2. Done: fork handling at same height
+   Added deterministic fork-choice + vote tracking for competing proposals at equal height, including tests.
+3. Done: safer networking defaults
+   Added outbound peer health/backoff and inbound per-peer rate limiting to avoid repeated hot-loop failures.
+4. Done: production state backend
+   Added configurable SQLite durable state backend (`stateBackend=sqlite`) with startup load + finalize/shutdown persistence.
+5. Done: sync for new/recovering nodes
+   Added startup peer sync with block catch-up plus `/sync/snapshot` fallback and continuity checks through `FinalizeExternalBlock`.
+6. Done (initial): validator lifecycle primitives
+   Added chain-level bond/unbond, slashing, jailing, and admin endpoints for operational control.
+7. Done (initial): on-chain validator lifecycle transaction kinds
+   Added consensus-applied `validator_bond/unbond/slash/jail` transactions, dev-signing support, and deterministic tests.
+8. Done (initial): jailing recovery rules
+   Added `validator_unjail` transaction handling with deterministic minimum-jail-block enforcement.
+9. Done (initial): equivocation evidence + penalty workflow
+   Added p2p conflicting-message evidence capture plus admin-triggered slash/jail application (`/p2p/evidence`).
+10. Done (initial): mempool DoS controls and bounded retention
+   Added per-account pending transaction caps and block-age-based mempool expiry with metrics and config controls.
+11. Done (initial): fuzz decoding/state-transition safety checks
+   Added fuzz targets for p2p envelope decoding/meta extraction and randomized consensus state transitions.
+12. Done (initial): peer discovery/bootstrap
+   Added periodic peer discovery from known peers using `/p2p/peers` to expand static peer lists automatically.
+13. Done (initial): on-chain delegation model
+   Added `delegation_delegate`/`delegation_undelegate` transaction kinds, delegation state persistence, API visibility, and effective-stake integration.
+14. Done (initial): backup restore + backend migration workflow
+   Added backup restore script and `migrate-state` command for snapshot/sqlite conversion with disaster recovery runbook.
+15. Done (initial): internal threat model baseline
+   Added scoped threat model and external security review checklist (`docs/security-threat-model.md`).
+16. Done (initial): epoch transitions and validator-set updates
+   Added epoch model (`epochLengthBlocks`) and epoch-boundary validator set snapshot updates.
+17. Done (initial): product proof schema
+   Added on-chain `ProductProof` records with challenge linkage and proof references.
+18. Done (initial): oracle/attestation work-weight updates
+   Added `product_attest` transaction flow with oracle authorization and work-weight smoothing updates.
+19. Done (initial): product-signal reward distribution
+   Added epoch-boundary reward payouts from treasury proportional to attested signal score.
+20. Done (initial): fraud/challenge flow
+   Added challenge + resolve transactions with invalidation, slash+jail, and challenger payout behavior.
+21. Done (initial): product billing and settlement APIs
+   Added settlement submission/listing and billing quote endpoints for product users.
 
 ## Suggested milestone timeline (single engineer, part-time)
 

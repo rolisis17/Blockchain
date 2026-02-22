@@ -1,0 +1,35 @@
+services:
+  node1:
+    image: golang:1.22
+    working_dir: /app
+    command: ["go", "run", "./cmd/node", "-config", "./configs/testnet/docker/node1.yaml"]
+    volumes:
+      - ./:/app
+      - node1-data:/data
+    ports:
+      - "18081:8080"
+
+  node2:
+    image: golang:1.22
+    working_dir: /app
+    command: ["go", "run", "./cmd/node", "-config", "./configs/testnet/docker/node2.yaml"]
+    volumes:
+      - ./:/app
+      - node2-data:/data
+    ports:
+      - "18082:8080"
+
+  node3:
+    image: golang:1.22
+    working_dir: /app
+    command: ["go", "run", "./cmd/node", "-config", "./configs/testnet/docker/node3.yaml"]
+    volumes:
+      - ./:/app
+      - node3-data:/data
+    ports:
+      - "18083:8080"
+
+volumes:
+  node1-data: {}
+  node2-data: {}
+  node3-data: {}

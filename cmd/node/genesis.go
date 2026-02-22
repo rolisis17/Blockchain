@@ -29,20 +29,20 @@ type genesisFile struct {
 	Validators         []chain.GenesisValidator `json:"validators"`
 }
 
-func buildChain(cfg chain.Config, genesisPath, statePath string) (*chain.Chain, bootInfo, error) {
+func buildChain(cfg chain.Config, genesisPath, stateBackend, statePath string) (*chain.Chain, bootInfo, error) {
 	if statePath != "" {
 		if _, err := os.Stat(statePath); err == nil {
-			loaded, err := chain.LoadSnapshot(statePath, cfg)
+			loaded, err := loadChainState(stateBackend, statePath, cfg)
 			if err != nil {
-				return nil, bootInfo{}, fmt.Errorf("load snapshot %s: %w", statePath, err)
+				return nil, bootInfo{}, fmt.Errorf("load %s state %s: %w", stateBackend, statePath, err)
 			}
 			return loaded, bootInfo{
 				LoadedFromSnapshot: true,
 				SnapshotPath:       statePath,
-				GenesisSource:      "snapshot",
+				GenesisSource:      stateBackend,
 			}, nil
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return nil, bootInfo{}, fmt.Errorf("check snapshot %s: %w", statePath, err)
+			return nil, bootInfo{}, fmt.Errorf("check state %s: %w", statePath, err)
 		}
 	}
 
@@ -66,6 +66,28 @@ func buildChain(cfg chain.Config, genesisPath, statePath string) (*chain.Chain, 
 		GenesisSource:      source,
 		DemoUsers:          demoUsers,
 	}, nil
+}
+
+func loadChainState(stateBackend, statePath string, cfg chain.Config) (*chain.Chain, error) {
+	switch normalizeStateBackend(stateBackend) {
+	case stateBackendSQLite:
+		return chain.LoadSQLiteSnapshot(statePath, cfg)
+	case stateBackendSnapshot:
+		return chain.LoadSnapshot(statePath, cfg)
+	default:
+		return nil, fmt.Errorf("unsupported state backend %q", stateBackend)
+	}
+}
+
+func saveChainState(c *chain.Chain, stateBackend, statePath string) error {
+	switch normalizeStateBackend(stateBackend) {
+	case stateBackendSQLite:
+		return c.SaveSQLiteSnapshot(statePath)
+	case stateBackendSnapshot:
+		return c.SaveSnapshot(statePath)
+	default:
+		return fmt.Errorf("unsupported state backend %q", stateBackend)
+	}
 }
 
 func loadGenesis(path string) (map[chain.Address]uint64, []chain.GenesisValidator, int64, map[string]demoUser, string, error) {

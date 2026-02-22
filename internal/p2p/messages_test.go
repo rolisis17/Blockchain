@@ -13,12 +13,14 @@ func TestEnvelopeSignAndVerify(t *testing.T) {
 	}
 
 	proposal := BlockProposal{
-		Height:     10,
-		PrevHash:   "abc",
-		ProposerID: "v1",
-		BlockHash:  "def",
-		StateRoot:  "root",
-		Timestamp:  1700000002000,
+		Block: chain.Block{
+			Height:    10,
+			PrevHash:  "abc",
+			Timestamp: 1700000002000,
+			Proposer:  "v1",
+			StateRoot: "root",
+			Hash:      "def",
+		},
 	}
 
 	env, err := NewEnvelope(MessageTypeBlockProposal, "v1", proposal, priv)
@@ -33,8 +35,8 @@ func TestEnvelopeSignAndVerify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if decoded.BlockHash != proposal.BlockHash {
-		t.Fatalf("decoded payload mismatch: got %s want %s", decoded.BlockHash, proposal.BlockHash)
+	if decoded.Block.Hash != proposal.Block.Hash {
+		t.Fatalf("decoded payload mismatch: got %s want %s", decoded.Block.Hash, proposal.Block.Hash)
 	}
 }
 

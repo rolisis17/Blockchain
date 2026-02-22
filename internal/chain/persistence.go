@@ -1,6 +1,7 @@
 package chain
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,22 +9,54 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
-const snapshotVersion = 1
+const (
+	snapshotVersion = 1
+	sqliteStateKey  = "latest"
+)
+
+const sqliteSchema = `
+CREATE TABLE IF NOT EXISTS chain_state (
+  key TEXT PRIMARY KEY,
+  version INTEGER NOT NULL,
+  payload BLOB NOT NULL,
+  updated_ms INTEGER NOT NULL
+);`
 
 type Snapshot struct {
-	Version         int                 `json:"version"`
-	BlockIntervalMs int64               `json:"blockIntervalMs"`
-	BaseReward      uint64              `json:"baseReward"`
-	MaxTxPerBlock   int                 `json:"maxTxPerBlock"`
-	MaxMempoolSize  int                 `json:"maxMempoolSize"`
-	MinTxFee        uint64              `json:"minTxFee"`
-	LastFinalizedMs int64               `json:"lastFinalizedMs"`
-	Accounts        map[Address]Account `json:"accounts"`
-	Validators      []Validator         `json:"validators"`
-	Mempool         []Transaction       `json:"mempool"`
-	Blocks          []Block             `json:"blocks"`
+	Version                 int                 `json:"version"`
+	BlockIntervalMs         int64               `json:"blockIntervalMs"`
+	BaseReward              uint64              `json:"baseReward"`
+	MinJailBlocks           uint64              `json:"minJailBlocks"`
+	EpochLengthBlocks       uint64              `json:"epochLengthBlocks"`
+	CurrentEpoch            uint64              `json:"currentEpoch"`
+	EpochStartHeight        uint64              `json:"epochStartHeight"`
+	EpochEffectiveStake     map[string]uint64   `json:"epochEffectiveStake,omitempty"`
+	MaxTxPerBlock           int                 `json:"maxTxPerBlock"`
+	MaxMempoolSize          int                 `json:"maxMempoolSize"`
+	MaxPendingTxPerAccount  int                 `json:"maxPendingTxPerAccount"`
+	MaxMempoolTxAgeBlocks   uint64              `json:"maxMempoolTxAgeBlocks"`
+	MinTxFee                uint64              `json:"minTxFee"`
+	ProductRewardBps        uint64              `json:"productRewardBps"`
+	ProductChallengeMinBond uint64              `json:"productChallengeMinBond"`
+	ProductTreasuryBalance  uint64              `json:"productTreasuryBalance"`
+	ProductProofs           []ProductProof      `json:"productProofs,omitempty"`
+	ProductChallenges       []ProductChallenge  `json:"productChallenges,omitempty"`
+	ProductSettlements      []ProductSettlement `json:"productSettlements,omitempty"`
+	ProductSignalScore      map[string]uint64   `json:"productSignalScore,omitempty"`
+	ProductLastRewardEpoch  uint64              `json:"productLastRewardEpoch"`
+	ProductLastRewards      map[string]uint64   `json:"productLastRewards,omitempty"`
+	LastFinalizedMs         int64               `json:"lastFinalizedMs"`
+	ExpiredTxTotal          uint64              `json:"expiredTxTotal"`
+	Accounts                map[Address]Account `json:"accounts"`
+	Validators              []Validator         `json:"validators"`
+	Delegations             []Delegation        `json:"delegations,omitempty"`
+	Mempool                 []Transaction       `json:"mempool"`
+	MempoolAddedHeight      map[string]uint64   `json:"mempoolAddedHeight,omitempty"`
+	Blocks                  []Block             `json:"blocks"`
 }
 
 func (c *Chain) Snapshot() Snapshot {
@@ -39,8 +72,71 @@ func (c *Chain) Snapshot() Snapshot {
 	for _, id := range c.validatorOrder {
 		validators = append(validators, *c.validators[id])
 	}
+	delegations := make([]Delegation, 0, len(c.delegations))
+	for _, key := range c.sortedDelegationKeysLocked() {
+		delegation := c.delegations[key]
+		if delegation == nil || delegation.Amount == 0 {
+			continue
+		}
+		delegations = append(delegations, *delegation)
+	}
+	epochEffectiveStake := make(map[string]uint64, len(c.epochEffectiveStake))
+	for validatorID, stake := range c.epochEffectiveStake {
+		epochEffectiveStake[validatorID] = stake
+	}
+	productProofIDs := make([]string, 0, len(c.productProofs))
+	for id := range c.productProofs {
+		productProofIDs = append(productProofIDs, id)
+	}
+	sort.Strings(productProofIDs)
+	productProofs := make([]ProductProof, 0, len(productProofIDs))
+	for _, id := range productProofIDs {
+		proof := c.productProofs[id]
+		if proof == nil {
+			continue
+		}
+		productProofs = append(productProofs, *proof)
+	}
+	productChallengeIDs := make([]string, 0, len(c.productChallenges))
+	for id := range c.productChallenges {
+		productChallengeIDs = append(productChallengeIDs, id)
+	}
+	sort.Strings(productChallengeIDs)
+	productChallenges := make([]ProductChallenge, 0, len(productChallengeIDs))
+	for _, id := range productChallengeIDs {
+		challenge := c.productChallenges[id]
+		if challenge == nil {
+			continue
+		}
+		productChallenges = append(productChallenges, *challenge)
+	}
+	productSettlementIDs := make([]string, 0, len(c.productSettlements))
+	for id := range c.productSettlements {
+		productSettlementIDs = append(productSettlementIDs, id)
+	}
+	sort.Strings(productSettlementIDs)
+	productSettlements := make([]ProductSettlement, 0, len(productSettlementIDs))
+	for _, id := range productSettlementIDs {
+		settlement := c.productSettlements[id]
+		if settlement == nil {
+			continue
+		}
+		productSettlements = append(productSettlements, *settlement)
+	}
+	productSignalScore := make(map[string]uint64, len(c.productSignalScore))
+	for validatorID, score := range c.productSignalScore {
+		productSignalScore[validatorID] = score
+	}
+	productLastRewards := make(map[string]uint64, len(c.lastProductRewards))
+	for validatorID, reward := range c.lastProductRewards {
+		productLastRewards[validatorID] = reward
+	}
 
 	mempool := append([]Transaction(nil), c.mempool...)
+	mempoolAddedHeight := make(map[string]uint64, len(c.mempoolAddedHeight))
+	for id, h := range c.mempoolAddedHeight {
+		mempoolAddedHeight[id] = h
+	}
 	blocks := make([]Block, 0, len(c.blocks))
 	for _, b := range c.blocks {
 		copied := b
@@ -54,17 +150,36 @@ func (c *Chain) Snapshot() Snapshot {
 	}
 
 	return Snapshot{
-		Version:         snapshotVersion,
-		BlockIntervalMs: c.blockInterval.Milliseconds(),
-		BaseReward:      c.baseReward,
-		MaxTxPerBlock:   c.maxTxPerBlock,
-		MaxMempoolSize:  c.maxMempoolSize,
-		MinTxFee:        c.minTxFee,
-		LastFinalizedMs: c.lastFinalizedAt.UnixMilli(),
-		Accounts:        accounts,
-		Validators:      validators,
-		Mempool:         mempool,
-		Blocks:          blocks,
+		Version:                 snapshotVersion,
+		BlockIntervalMs:         c.blockInterval.Milliseconds(),
+		BaseReward:              c.baseReward,
+		MinJailBlocks:           c.minJailBlocks,
+		EpochLengthBlocks:       c.epochLengthBlocks,
+		CurrentEpoch:            c.currentEpoch,
+		EpochStartHeight:        c.epochStartHeight,
+		EpochEffectiveStake:     epochEffectiveStake,
+		MaxTxPerBlock:           c.maxTxPerBlock,
+		MaxMempoolSize:          c.maxMempoolSize,
+		MaxPendingTxPerAccount:  c.maxPendingTxPerAccount,
+		MaxMempoolTxAgeBlocks:   c.maxMempoolTxAgeBlocks,
+		MinTxFee:                c.minTxFee,
+		ProductRewardBps:        c.productRewardBps,
+		ProductChallengeMinBond: c.productChallengeMinBond,
+		ProductTreasuryBalance:  c.productTreasuryBalance,
+		ProductProofs:           productProofs,
+		ProductChallenges:       productChallenges,
+		ProductSettlements:      productSettlements,
+		ProductSignalScore:      productSignalScore,
+		ProductLastRewardEpoch:  c.lastProductRewardEpoch,
+		ProductLastRewards:      productLastRewards,
+		LastFinalizedMs:         c.lastFinalizedAt.UnixMilli(),
+		ExpiredTxTotal:          c.expiredTxTotal,
+		Accounts:                accounts,
+		Validators:              validators,
+		Delegations:             delegations,
+		Mempool:                 mempool,
+		MempoolAddedHeight:      mempoolAddedHeight,
+		Blocks:                  blocks,
 	}
 }
 
@@ -72,10 +187,9 @@ func (c *Chain) SaveSnapshot(path string) error {
 	if path == "" {
 		return errors.New("snapshot path is required")
 	}
-	ss := c.Snapshot()
-	data, err := json.MarshalIndent(ss, "", "  ")
+	data, err := c.snapshotJSON(true)
 	if err != nil {
-		return fmt.Errorf("marshal snapshot: %w", err)
+		return err
 	}
 
 	dir := filepath.Dir(path)
@@ -101,13 +215,127 @@ func LoadSnapshot(path string, cfg Config) (*Chain, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read snapshot: %w", err)
 	}
+	ss, err := decodeSnapshotJSON(data)
+	if err != nil {
+		return nil, err
+	}
+
+	return chainFromSnapshot(ss, cfg)
+}
+
+func LoadSnapshotBytes(data []byte, cfg Config) (*Chain, error) {
+	if len(data) == 0 {
+		return nil, errors.New("snapshot data is empty")
+	}
+	ss, err := decodeSnapshotJSON(data)
+	if err != nil {
+		return nil, err
+	}
+	return chainFromSnapshot(ss, cfg)
+}
+
+func (c *Chain) SaveSQLiteSnapshot(path string) error {
+	if path == "" {
+		return errors.New("sqlite state path is required")
+	}
+
+	data, err := c.snapshotJSON(false)
+	if err != nil {
+		return err
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create sqlite state dir: %w", err)
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return fmt.Errorf("open sqlite state: %w", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(sqliteSchema); err != nil {
+		return fmt.Errorf("ensure sqlite schema: %w", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO chain_state (key, version, payload, updated_ms)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET
+         version = excluded.version,
+         payload = excluded.payload,
+         updated_ms = excluded.updated_ms`,
+		sqliteStateKey,
+		snapshotVersion,
+		data,
+		time.Now().UnixMilli(),
+	); err != nil {
+		return fmt.Errorf("write sqlite snapshot: %w", err)
+	}
+	return nil
+}
+
+func LoadSQLiteSnapshot(path string, cfg Config) (*Chain, error) {
+	if path == "" {
+		return nil, errors.New("sqlite state path is required")
+	}
+
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite state: %w", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(sqliteSchema); err != nil {
+		return nil, fmt.Errorf("ensure sqlite schema: %w", err)
+	}
+
+	var data []byte
+	err = db.QueryRow(`SELECT payload FROM chain_state WHERE key = ?`, sqliteStateKey).Scan(&data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, errors.New("sqlite state has no snapshot")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read sqlite snapshot: %w", err)
+	}
+
+	ss, err := decodeSnapshotJSON(data)
+	if err != nil {
+		return nil, err
+	}
+
+	return chainFromSnapshot(ss, cfg)
+}
+
+func (c *Chain) snapshotJSON(pretty bool) ([]byte, error) {
+	ss := c.Snapshot()
+	var (
+		data []byte
+		err  error
+	)
+	if pretty {
+		data, err = json.MarshalIndent(ss, "", "  ")
+	} else {
+		data, err = json.Marshal(ss)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("marshal snapshot: %w", err)
+	}
+	return data, nil
+}
+
+func decodeSnapshotJSON(data []byte) (Snapshot, error) {
 	var ss Snapshot
 	if err := json.Unmarshal(data, &ss); err != nil {
-		return nil, fmt.Errorf("decode snapshot: %w", err)
+		return Snapshot{}, fmt.Errorf("decode snapshot: %w", err)
 	}
 	if ss.Version != snapshotVersion {
-		return nil, fmt.Errorf("unsupported snapshot version %d", ss.Version)
+		return Snapshot{}, fmt.Errorf("unsupported snapshot version %d", ss.Version)
 	}
+	return ss, nil
+}
+
+func chainFromSnapshot(ss Snapshot, cfg Config) (*Chain, error) {
 	if len(ss.Blocks) == 0 {
 		return nil, errors.New("snapshot has no blocks")
 	}
@@ -142,6 +370,28 @@ func LoadSnapshot(path string, cfg Config) (*Chain, error) {
 	}
 	sort.Strings(order)
 
+	delegations := make(map[string]*Delegation, len(ss.Delegations))
+	for _, delegation := range ss.Delegations {
+		if delegation.ValidatorID == "" {
+			return nil, errors.New("snapshot contains delegation with empty validator id")
+		}
+		if delegation.Delegator == "" {
+			return nil, errors.New("snapshot contains delegation with empty delegator")
+		}
+		if delegation.Amount == 0 {
+			continue
+		}
+		if _, ok := validators[delegation.ValidatorID]; !ok {
+			return nil, fmt.Errorf("snapshot delegation references unknown validator %q", delegation.ValidatorID)
+		}
+		key := delegationKey(delegation.Delegator, delegation.ValidatorID)
+		if _, exists := delegations[key]; exists {
+			return nil, fmt.Errorf("duplicate delegation in snapshot for %s -> %s", delegation.Delegator, delegation.ValidatorID)
+		}
+		copied := delegation
+		delegations[key] = &copied
+	}
+
 	blocks := make([]Block, 0, len(ss.Blocks))
 	for i, block := range ss.Blocks {
 		if block.Height != uint64(i) {
@@ -168,6 +418,20 @@ func LoadSnapshot(path string, cfg Config) (*Chain, error) {
 	if cfg.BaseReward != 0 {
 		baseReward = cfg.BaseReward
 	}
+	minJailBlocks := ss.MinJailBlocks
+	if cfg.MinJailBlocks != 0 {
+		minJailBlocks = cfg.MinJailBlocks
+	}
+	if minJailBlocks == 0 {
+		minJailBlocks = defaultMinJailBlocks
+	}
+	epochLength := ss.EpochLengthBlocks
+	if cfg.EpochLengthBlocks > 0 {
+		epochLength = cfg.EpochLengthBlocks
+	}
+	if epochLength == 0 {
+		epochLength = defaultEpochLengthBlocks
+	}
 	maxTx := ss.MaxTxPerBlock
 	if cfg.MaxTxPerBlock > 0 {
 		maxTx = cfg.MaxTxPerBlock
@@ -182,12 +446,43 @@ func LoadSnapshot(path string, cfg Config) (*Chain, error) {
 	if maxMempool <= 0 {
 		maxMempool = 20_000
 	}
+	maxPendingPerAccount := ss.MaxPendingTxPerAccount
+	if cfg.MaxPendingTxPerAccount > 0 {
+		maxPendingPerAccount = cfg.MaxPendingTxPerAccount
+	}
+	if maxPendingPerAccount <= 0 {
+		maxPendingPerAccount = defaultMaxPendingPerAccount
+	}
+	maxMempoolAgeBlocks := ss.MaxMempoolTxAgeBlocks
+	if cfg.MaxMempoolTxAgeBlocks > 0 {
+		maxMempoolAgeBlocks = cfg.MaxMempoolTxAgeBlocks
+	}
+	if maxMempoolAgeBlocks == 0 {
+		maxMempoolAgeBlocks = defaultMaxMempoolTxAgeBlocks
+	}
 	minTxFee := ss.MinTxFee
 	if cfg.MinTxFee > 0 {
 		minTxFee = cfg.MinTxFee
 	}
 	if minTxFee == 0 {
 		minTxFee = 1
+	}
+	productRewardBps := ss.ProductRewardBps
+	if cfg.ProductRewardBps > 0 {
+		productRewardBps = cfg.ProductRewardBps
+	}
+	if productRewardBps > 10_000 {
+		productRewardBps = 10_000
+	}
+	if productRewardBps == 0 {
+		productRewardBps = defaultProductRewardBps
+	}
+	productChallengeMinBond := ss.ProductChallengeMinBond
+	if cfg.ProductChallengeMinBond > 0 {
+		productChallengeMinBond = cfg.ProductChallengeMinBond
+	}
+	if productChallengeMinBond == 0 {
+		productChallengeMinBond = defaultProductChallengeBond
 	}
 
 	lastFinalizedAt := time.UnixMilli(ss.LastFinalizedMs)
@@ -196,23 +491,93 @@ func LoadSnapshot(path string, cfg Config) (*Chain, error) {
 	}
 
 	c := &Chain{
-		accounts:        accounts,
-		validators:      validators,
-		validatorOrder:  order,
-		mempool:         append([]Transaction(nil), ss.Mempool...),
-		mempoolSet:      make(map[string]struct{}, len(ss.Mempool)),
-		blocks:          blocks,
-		blockInterval:   blockInterval,
-		baseReward:      baseReward,
-		maxTxPerBlock:   maxTx,
-		maxMempoolSize:  maxMempool,
-		minTxFee:        minTxFee,
-		finalizeHook:    cfg.FinalizeHook,
-		lastFinalizedAt: lastFinalizedAt,
-		startedAt:       time.Now(),
+		accounts:                accounts,
+		validators:              validators,
+		delegations:             delegations,
+		validatorOrder:          order,
+		mempool:                 append([]Transaction(nil), ss.Mempool...),
+		mempoolSet:              make(map[string]struct{}, len(ss.Mempool)),
+		mempoolAddedHeight:      make(map[string]uint64, len(ss.Mempool)),
+		blocks:                  blocks,
+		blockInterval:           blockInterval,
+		baseReward:              baseReward,
+		minJailBlocks:           minJailBlocks,
+		epochLengthBlocks:       epochLength,
+		currentEpoch:            ss.CurrentEpoch,
+		epochStartHeight:        ss.EpochStartHeight,
+		epochEffectiveStake:     make(map[string]uint64),
+		maxTxPerBlock:           maxTx,
+		maxMempoolSize:          maxMempool,
+		maxPendingTxPerAccount:  maxPendingPerAccount,
+		maxMempoolTxAgeBlocks:   maxMempoolAgeBlocks,
+		minTxFee:                minTxFee,
+		productRewardBps:        productRewardBps,
+		productChallengeMinBond: productChallengeMinBond,
+		productTreasuryBalance:  ss.ProductTreasuryBalance,
+		productProofs:           make(map[string]*ProductProof, len(ss.ProductProofs)),
+		productChallenges:       make(map[string]*ProductChallenge, len(ss.ProductChallenges)),
+		productOpenChallenges:   make(map[string]string, len(ss.ProductChallenges)),
+		productSettlements:      make(map[string]*ProductSettlement, len(ss.ProductSettlements)),
+		productSignalScore:      make(map[string]uint64, len(ss.ProductSignalScore)),
+		lastProductRewardEpoch:  ss.ProductLastRewardEpoch,
+		lastProductRewards:      make(map[string]uint64, len(ss.ProductLastRewards)),
+		finalizeHook:            cfg.FinalizeHook,
+		lastFinalizedAt:         lastFinalizedAt,
+		startedAt:               time.Now(),
+		expiredTxTotal:          ss.ExpiredTxTotal,
 	}
+	if c.epochStartHeight == 0 {
+		if c.epochLengthBlocks > 0 {
+			c.epochStartHeight = (c.currentEpoch * c.epochLengthBlocks) + 1
+		} else {
+			c.epochStartHeight = 1
+		}
+	}
+	for validatorID, stake := range ss.EpochEffectiveStake {
+		c.epochEffectiveStake[validatorID] = stake
+	}
+	if len(c.epochEffectiveStake) == 0 {
+		c.epochEffectiveStake = c.buildEpochStakeSnapshotForState(c.validators, c.delegations)
+	}
+	for _, proof := range ss.ProductProofs {
+		if proof.ID == "" {
+			continue
+		}
+		copied := proof
+		c.productProofs[proof.ID] = &copied
+	}
+	for _, challenge := range ss.ProductChallenges {
+		if challenge.ID == "" {
+			continue
+		}
+		copied := challenge
+		c.productChallenges[challenge.ID] = &copied
+		if copied.Open {
+			c.productOpenChallenges[copied.ProofID] = copied.ID
+		}
+	}
+	for _, settlement := range ss.ProductSettlements {
+		if settlement.ID == "" {
+			continue
+		}
+		copied := settlement
+		c.productSettlements[settlement.ID] = &copied
+	}
+	for validatorID, score := range ss.ProductSignalScore {
+		c.productSignalScore[validatorID] = score
+	}
+	for validatorID, reward := range ss.ProductLastRewards {
+		c.lastProductRewards[validatorID] = reward
+	}
+	currentHeight := uint64(len(c.blocks))
 	for _, tx := range c.mempool {
-		c.mempoolSet[tx.ID()] = struct{}{}
+		txID := tx.ID()
+		c.mempoolSet[txID] = struct{}{}
+		addedHeight, ok := ss.MempoolAddedHeight[txID]
+		if !ok {
+			addedHeight = currentHeight
+		}
+		c.mempoolAddedHeight[txID] = addedHeight
 	}
 	c.mempoolPeak = len(c.mempool)
 

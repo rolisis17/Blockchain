@@ -1,0 +1,20 @@
+http: ":18083"
+genesis: "./configs/genesis.example.json"
+state: "./data/testnet/local/node3-state.json"
+
+blockInterval: "2s"
+baseReward: 1
+maxTxPerBlock: 500
+maxMempoolSize: 20000
+minTxFee: 1
+
+adminToken: "testnet-admin"
+allowDevSigning: true
+readinessMaxLag: "0s"
+
+p2pEnabled: true
+nodeId: "v3"
+validatorPrivateKey: "5c9a86a8bd645993a5d2bb272b83c41f764cbc45f6636d725f5336c0223eb14fcf17e30a16383db33ec3bc181b697d8ca3c5a8c27d7c8ad4f0e33451f3549f98"
+peers:
+  - "http://127.0.0.1:18081"
+  - "http://127.0.0.1:18082"

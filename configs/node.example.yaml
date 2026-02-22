@@ -1,13 +1,27 @@
 http: ":8080"
+# state backend: snapshot (JSON) or sqlite
+stateBackend: "snapshot"
 state: "./data/state.json"
+# Optional periodic backup snapshots (JSON). backupEveryBlocks=0 disables.
+backupDir: "./data/backups"
+backupEveryBlocks: 0
+backupRetain: 20
+# For sqlite backend, use a .db path (example: ./data/state.db)
 # Optional; if omitted, built-in deterministic genesis is used.
 # genesis: "./configs/genesis.example.json"
 
 blockInterval: "2s"
 baseReward: 1
+minJailBlocks: 3
+epochLengthBlocks: 1
 maxTxPerBlock: 500
 maxMempoolSize: 20000
+maxPendingTxPerAccount: 64
+maxMempoolTxAgeBlocks: 120
 minTxFee: 1
+productRewardBps: 2000
+productChallengeMinBond: 10
+productUnitPrice: 1
 
 # Set for production-like runs. Can also come from FASTPOS_ADMIN_TOKEN env.
 adminToken: "change-me"
@@ -17,3 +31,16 @@ allowDevSigning: false
 
 # 0 means auto: max(4 * blockInterval, 10s)
 readinessMaxLag: "0s"
+
+# P2P phase 2 settings
+p2pEnabled: false
+nodeId: ""
+validatorPrivateKey: ""
+p2pProposerTimeoutTicks: 2
+p2pMaxRoundLookahead: 16
+p2pPeerBackoffInitial: "500ms"
+p2pPeerBackoffMax: "15s"
+p2pInboundRateLimitPerPeer: 120
+p2pInboundRateWindow: "1s"
+# Used for p2p gossip and startup sync catch-up.
+peers: []

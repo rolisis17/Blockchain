@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
+	"fastpos/internal/chain"
 )
 
 const (
@@ -22,12 +24,7 @@ type Envelope struct {
 }
 
 type BlockProposal struct {
-	Height     uint64 `json:"height"`
-	PrevHash   string `json:"prevHash"`
-	ProposerID string `json:"proposerId"`
-	BlockHash  string `json:"blockHash"`
-	StateRoot  string `json:"stateRoot"`
-	Timestamp  int64  `json:"timestamp"`
+	Block chain.Block `json:"block"`
 }
 
 type BlockVote struct {
@@ -39,11 +36,10 @@ type BlockVote struct {
 }
 
 type BlockFinalize struct {
-	Height     uint64 `json:"height"`
-	BlockHash  string `json:"blockHash"`
-	YesStake   uint64 `json:"yesStake"`
-	TotalStake uint64 `json:"totalStake"`
-	Timestamp  int64  `json:"timestamp"`
+	Block      chain.Block `json:"block"`
+	YesStake   uint64      `json:"yesStake"`
+	TotalStake uint64      `json:"totalStake"`
+	Timestamp  int64       `json:"timestamp"`
 }
 
 func NewEnvelope(messageType, senderID string, payload any, privKeyHex string) (Envelope, error) {

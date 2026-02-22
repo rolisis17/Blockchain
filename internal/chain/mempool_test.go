@@ -128,3 +128,69 @@ func TestMempoolEvictionWithHigherFeeReplacement(t *testing.T) {
 		t.Fatalf("expected submitted tx total 3, got %d", m.SubmittedTxTotal)
 	}
 }
+
+func TestMempoolPendingPerAccountLimit(t *testing.T) {
+	c, alicePriv, aliceAddr, bobAddr := newMempoolTestChain(t, Config{
+		BaseReward:             0,
+		MaxTxPerBlock:          100,
+		MaxMempoolSize:         100,
+		MaxPendingTxPerAccount: 1,
+		MaxMempoolTxAgeBlocks:  120,
+		MinTxFee:               1,
+	})
+
+	tx1 := signTxForTest(t, alicePriv, aliceAddr, bobAddr, 10, 1, 1)
+	if _, err := c.SubmitTx(tx1); err != nil {
+		t.Fatalf("submit tx1: %v", err)
+	}
+
+	tx2 := signTxForTest(t, alicePriv, aliceAddr, bobAddr, 10, 1, 2)
+	if _, err := c.SubmitTx(tx2); !errors.Is(err, ErrMempoolAccountLimit) {
+		t.Fatalf("expected ErrMempoolAccountLimit, got %v", err)
+	}
+
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce block: %v", err)
+	}
+
+	if _, err := c.SubmitTx(tx2); err != nil {
+		t.Fatalf("submit tx2 after block finalize: %v", err)
+	}
+}
+
+func TestMempoolTransactionExpiryByBlockAge(t *testing.T) {
+	c, alicePriv, aliceAddr, bobAddr := newMempoolTestChain(t, Config{
+		BaseReward:             0,
+		MaxTxPerBlock:          1,
+		MaxMempoolSize:         100,
+		MaxPendingTxPerAccount: 64,
+		MaxMempoolTxAgeBlocks:  1,
+		MinTxFee:               1,
+	})
+
+	tx1 := signTxForTest(t, alicePriv, aliceAddr, bobAddr, 10, 1, 1)
+	tx2 := signTxForTest(t, alicePriv, aliceAddr, bobAddr, 10, 1, 2)
+	if _, err := c.SubmitTx(tx1); err != nil {
+		t.Fatalf("submit tx1: %v", err)
+	}
+	if _, err := c.SubmitTx(tx2); err != nil {
+		t.Fatalf("submit tx2: %v", err)
+	}
+
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce block: %v", err)
+	}
+
+	nextNonce, err := c.NextNonce(aliceAddr)
+	if err != nil {
+		t.Fatalf("next nonce: %v", err)
+	}
+	if nextNonce != 2 {
+		t.Fatalf("expected next nonce 2 after pending tx expiry, got %d", nextNonce)
+	}
+
+	m := c.GetMetrics()
+	if m.ExpiredTxTotal != 1 {
+		t.Fatalf("expected expired tx total 1, got %d", m.ExpiredTxTotal)
+	}
+}
