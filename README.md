@@ -26,8 +26,17 @@ It currently provides:
 - Epoch transitions with validator-set snapshot updates (`epochLengthBlocks`)
 - Product integration tx kinds (`product_settle`, `product_attest`, `product_challenge`, `product_resolve_challenge`)
 - Product treasury + epoch reward distribution from product signals (attestation score)
-- Product proof/challenge/settlement state with fraud challenge resolution flow
-- Product billing/settlement/attestation API endpoints
+- Stake-weighted oracle quorum on product attestation/challenge resolution (`productOracleQuorumBps`)
+- Product proof/pending-attestation/challenge/settlement state with delayed fraud resolution flow
+- Pending attestation TTL and challenge max-open timeout guardrails
+- Product billing/settlement/attestation API endpoints with filter + pagination support
+- Idempotent settlement protection per payer/reference
+- Pending attestation stats API for quorum-progress visibility (`GET /product/attestations/stats`)
+- Settlement aggregation stats API for reconciliation dashboards (`GET /product/settlements/stats`)
+- Challenge aggregation stats API for fraud/review monitoring (`GET /product/challenges/stats`)
+- Transaction lookup API for pending/finalized status (`GET /tx?id=...`)
+- Finalized transaction query API with filters/pagination (`GET /tx/finalized`)
+- Idempotent tx submission retries (`POST /tx?idempotent=true`)
 - Validator lifecycle admin override endpoints (bond/unbond/slash/jail)
 
 This is still pre-production.
@@ -77,6 +86,10 @@ Precedence is: `defaults < config file < CLI flags`.
 - `-epoch-length-blocks`
 - `-product-reward-bps`
 - `-product-challenge-min-bond`
+- `-product-oracle-quorum-bps`
+- `-product-challenge-resolve-delay-blocks`
+- `-product-attestation-ttl-blocks`
+- `-product-challenge-max-open-blocks`
 - `-product-unit-price`
 - `-admin-token` (or env `FASTPOS_ADMIN_TOKEN`)
 - `-allow-dev-signing` (unsafe; local dev only)
@@ -117,13 +130,18 @@ go run ./cmd/node -state-backend sqlite -state ./data/state.db
 - `GET /validators`
 - `GET /delegations` (`?delegator=...&validatorId=...` filters optional)
 - `GET /product/status`
-- `GET /product/proofs` (`?validatorId=...&includeInvalid=true|false`)
-- `POST /product/attestations` (submit pre-signed `product_attest` tx)
-- `GET /product/challenges`
-- `POST /product/challenges` (submit pre-signed `product_challenge` tx)
-- `POST /product/challenges/resolve` (submit pre-signed `product_resolve_challenge` tx)
-- `GET /product/settlements`
-- `POST /product/settlements` (submit pre-signed `product_settle` tx)
+- `GET /product/proofs` (`?id=...&proofRef=...&validatorId=...&reporter=...&epoch=...&minScore=...&maxScore=...&includeInvalid=true|false&offset=...&limit=...&withMeta=true|false`)
+- `POST /product/attestations` (submit pre-signed `product_attest` tx; use `?idempotent=true` for safe duplicate-vote retries)
+- `GET /product/attestations/stats` (`?id=...&proofId=...&proofRef=...&validatorId=...&epoch=...&minCollectedStake=...&sinceMs=...&untilMs=...`; aggregate pending attestation quorum-progress stats)
+- `GET /product/attestations/pending` (`?id=...&proofId=...&proofRef=...&validatorId=...&epoch=...&minCollectedStake=...&sinceMs=...&untilMs=...&offset=...&limit=...&withMeta=true|false` filters optional)
+- `GET /product/challenges` (`?id=...&proofId=...&challenger=...&resolver=...&successful=true|false&openOnly=true|false&minBond=...&sinceMs=...&untilMs=...&offset=...&limit=...&withMeta=true|false`)
+- `GET /product/challenges/stats` (`?id=...&proofId=...&challenger=...&resolver=...&successful=true|false&openOnly=true|false&minBond=...&sinceMs=...&untilMs=...`; aggregate challenge totals and grouped challenger/resolver stats)
+- `POST /product/challenges` (submit pre-signed `product_challenge` tx; use `?idempotent=true` for safe duplicate challenge retries)
+- `POST /product/challenges/resolve` (submit pre-signed `product_resolve_challenge` tx; use `?idempotent=true` for safe duplicate resolve-vote retries)
+- `GET /product/settlements` (`?id=...&reference=...&payer=...&validatorId=...&epoch=...&minAmount=...&maxAmount=...&sinceMs=...&untilMs=...&offset=...&limit=...&withMeta=true|false` filters optional)
+- `GET /product/settlements/lookup` (`?payer=...&reference=...&includePending=true|false`)
+- `GET /product/settlements/stats` (`?id=...&reference=...&payer=...&validatorId=...&epoch=...&minAmount=...&maxAmount=...&sinceMs=...&untilMs=...`; returns aggregate `count`, `totalAmount`, grouped by validator/epoch)
+- `POST /product/settlements` (submit pre-signed `product_settle` tx; use `?idempotent=true` for safe payer/reference retries)
 - `GET /product/billing/quote?units=...`
 - `POST /validators/work-weight` (admin token)
 - `POST /validators/active` (admin token)
@@ -134,7 +152,10 @@ go run ./cmd/node -state-backend sqlite -state ./data/state.db
 - `GET /accounts/{address}`
 - `GET /nonce/{address}`
 - `GET /blocks?from=0&limit=20`
-- `POST /tx` (submit pre-signed tx)
+- `GET /tx/pending` (`?from=...&to=...&kind=...&validatorId=...&minFee=...&maxFee=...&offset=...&limit=...&withMeta=true|false`)
+- `GET /tx/finalized` (`?from=...&to=...&kind=...&validatorId=...&minFee=...&maxFee=...&minHeight=...&maxHeight=...&offset=...&limit=...&withMeta=true|false`)
+- `GET /tx?id=...` (lookup tx in mempool/finalized blocks)
+- `POST /tx` (submit pre-signed tx; use `?idempotent=true` to safely retry duplicate submissions)
 - `POST /wallets` (dev signing mode only)
 - `POST /tx/sign` (dev signing mode only)
 - `POST /tx/sign-and-submit` (dev signing mode only)
@@ -149,10 +170,10 @@ Supported transaction kinds for `POST /tx`:
 - `validator_unjail`: requires `validatorId`, `fee`, `nonce`, `timestamp`
 - `delegation_delegate`: requires `validatorId`, `amount`, `fee`, `nonce`, `timestamp`
 - `delegation_undelegate`: requires `validatorId`, `amount`, `fee`, `nonce`, `timestamp`
-- `product_settle`: requires `to` (product reference), `amount`, `fee`, `nonce`, `timestamp`
-- `product_attest`: requires `to` (proof reference), `validatorId`, `amount`, `basisPoints`, `fee`, `nonce`, `timestamp`
+- `product_settle`: requires `to` (product reference), `amount`, `fee`, `nonce`, `timestamp`; `to` must be unique per payer (idempotent payer/reference settlement)
+- `product_attest`: requires `to` (proof reference), `validatorId`, `amount`, `basisPoints`, `fee`, `nonce`, `timestamp`; finalized only after oracle quorum
 - `product_challenge`: requires `to` (proof id), `amount` (bond), `fee`, `nonce`, `timestamp`
-- `product_resolve_challenge`: requires `to` (challenge id), optional `amount` (bonus payout), `basisPoints` (`0` reject, `>0` accept+slash), `fee`, `nonce`, `timestamp`
+- `product_resolve_challenge`: requires `to` (challenge id), `basisPoints` (`0` reject, `>0` accept+slash), `fee`, `nonce`, `timestamp`; `amount` (bonus payout) allowed only when `basisPoints > 0`, and voting is quorum-based after challenge delay
 
 Admin endpoints require header:
 

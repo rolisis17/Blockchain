@@ -27,36 +27,41 @@ CREATE TABLE IF NOT EXISTS chain_state (
 );`
 
 type Snapshot struct {
-	Version                 int                 `json:"version"`
-	BlockIntervalMs         int64               `json:"blockIntervalMs"`
-	BaseReward              uint64              `json:"baseReward"`
-	MinJailBlocks           uint64              `json:"minJailBlocks"`
-	EpochLengthBlocks       uint64              `json:"epochLengthBlocks"`
-	CurrentEpoch            uint64              `json:"currentEpoch"`
-	EpochStartHeight        uint64              `json:"epochStartHeight"`
-	EpochEffectiveStake     map[string]uint64   `json:"epochEffectiveStake,omitempty"`
-	MaxTxPerBlock           int                 `json:"maxTxPerBlock"`
-	MaxMempoolSize          int                 `json:"maxMempoolSize"`
-	MaxPendingTxPerAccount  int                 `json:"maxPendingTxPerAccount"`
-	MaxMempoolTxAgeBlocks   uint64              `json:"maxMempoolTxAgeBlocks"`
-	MinTxFee                uint64              `json:"minTxFee"`
-	ProductRewardBps        uint64              `json:"productRewardBps"`
-	ProductChallengeMinBond uint64              `json:"productChallengeMinBond"`
-	ProductTreasuryBalance  uint64              `json:"productTreasuryBalance"`
-	ProductProofs           []ProductProof      `json:"productProofs,omitempty"`
-	ProductChallenges       []ProductChallenge  `json:"productChallenges,omitempty"`
-	ProductSettlements      []ProductSettlement `json:"productSettlements,omitempty"`
-	ProductSignalScore      map[string]uint64   `json:"productSignalScore,omitempty"`
-	ProductLastRewardEpoch  uint64              `json:"productLastRewardEpoch"`
-	ProductLastRewards      map[string]uint64   `json:"productLastRewards,omitempty"`
-	LastFinalizedMs         int64               `json:"lastFinalizedMs"`
-	ExpiredTxTotal          uint64              `json:"expiredTxTotal"`
-	Accounts                map[Address]Account `json:"accounts"`
-	Validators              []Validator         `json:"validators"`
-	Delegations             []Delegation        `json:"delegations,omitempty"`
-	Mempool                 []Transaction       `json:"mempool"`
-	MempoolAddedHeight      map[string]uint64   `json:"mempoolAddedHeight,omitempty"`
-	Blocks                  []Block             `json:"blocks"`
+	Version                            int                         `json:"version"`
+	BlockIntervalMs                    int64                       `json:"blockIntervalMs"`
+	BaseReward                         uint64                      `json:"baseReward"`
+	MinJailBlocks                      uint64                      `json:"minJailBlocks"`
+	EpochLengthBlocks                  uint64                      `json:"epochLengthBlocks"`
+	CurrentEpoch                       uint64                      `json:"currentEpoch"`
+	EpochStartHeight                   uint64                      `json:"epochStartHeight"`
+	EpochEffectiveStake                map[string]uint64           `json:"epochEffectiveStake,omitempty"`
+	MaxTxPerBlock                      int                         `json:"maxTxPerBlock"`
+	MaxMempoolSize                     int                         `json:"maxMempoolSize"`
+	MaxPendingTxPerAccount             int                         `json:"maxPendingTxPerAccount"`
+	MaxMempoolTxAgeBlocks              uint64                      `json:"maxMempoolTxAgeBlocks"`
+	MinTxFee                           uint64                      `json:"minTxFee"`
+	ProductRewardBps                   uint64                      `json:"productRewardBps"`
+	ProductChallengeMinBond            uint64                      `json:"productChallengeMinBond"`
+	ProductOracleQuorumBps             uint64                      `json:"productOracleQuorumBps"`
+	ProductChallengeResolveDelayBlocks uint64                      `json:"productChallengeResolveDelayBlocks"`
+	ProductAttestationTTLBlocks        uint64                      `json:"productAttestationTtlBlocks"`
+	ProductChallengeMaxOpenBlocks      uint64                      `json:"productChallengeMaxOpenBlocks"`
+	ProductTreasuryBalance             uint64                      `json:"productTreasuryBalance"`
+	ProductProofs                      []ProductProof              `json:"productProofs,omitempty"`
+	ProductPendingAttestations         []ProductPendingAttestation `json:"productPendingAttestations,omitempty"`
+	ProductChallenges                  []ProductChallenge          `json:"productChallenges,omitempty"`
+	ProductSettlements                 []ProductSettlement         `json:"productSettlements,omitempty"`
+	ProductSignalScore                 map[string]uint64           `json:"productSignalScore,omitempty"`
+	ProductLastRewardEpoch             uint64                      `json:"productLastRewardEpoch"`
+	ProductLastRewards                 map[string]uint64           `json:"productLastRewards,omitempty"`
+	LastFinalizedMs                    int64                       `json:"lastFinalizedMs"`
+	ExpiredTxTotal                     uint64                      `json:"expiredTxTotal"`
+	Accounts                           map[Address]Account         `json:"accounts"`
+	Validators                         []Validator                 `json:"validators"`
+	Delegations                        []Delegation                `json:"delegations,omitempty"`
+	Mempool                            []Transaction               `json:"mempool"`
+	MempoolAddedHeight                 map[string]uint64           `json:"mempoolAddedHeight,omitempty"`
+	Blocks                             []Block                     `json:"blocks"`
 }
 
 func (c *Chain) Snapshot() Snapshot {
@@ -97,6 +102,23 @@ func (c *Chain) Snapshot() Snapshot {
 		}
 		productProofs = append(productProofs, *proof)
 	}
+	productPendingIDs := make([]string, 0, len(c.productPendingAttestations))
+	for id := range c.productPendingAttestations {
+		productPendingIDs = append(productPendingIDs, id)
+	}
+	sort.Strings(productPendingIDs)
+	productPendingAttestations := make([]ProductPendingAttestation, 0, len(productPendingIDs))
+	for _, id := range productPendingIDs {
+		pending := c.productPendingAttestations[id]
+		if pending == nil {
+			continue
+		}
+		copied := *pending
+		if len(pending.Votes) > 0 {
+			copied.Votes = append([]ProductAttestationVote(nil), pending.Votes...)
+		}
+		productPendingAttestations = append(productPendingAttestations, copied)
+	}
 	productChallengeIDs := make([]string, 0, len(c.productChallenges))
 	for id := range c.productChallenges {
 		productChallengeIDs = append(productChallengeIDs, id)
@@ -108,7 +130,11 @@ func (c *Chain) Snapshot() Snapshot {
 		if challenge == nil {
 			continue
 		}
-		productChallenges = append(productChallenges, *challenge)
+		copied := *challenge
+		if len(challenge.Votes) > 0 {
+			copied.Votes = append([]ProductChallengeVote(nil), challenge.Votes...)
+		}
+		productChallenges = append(productChallenges, copied)
 	}
 	productSettlementIDs := make([]string, 0, len(c.productSettlements))
 	for id := range c.productSettlements {
@@ -150,36 +176,41 @@ func (c *Chain) Snapshot() Snapshot {
 	}
 
 	return Snapshot{
-		Version:                 snapshotVersion,
-		BlockIntervalMs:         c.blockInterval.Milliseconds(),
-		BaseReward:              c.baseReward,
-		MinJailBlocks:           c.minJailBlocks,
-		EpochLengthBlocks:       c.epochLengthBlocks,
-		CurrentEpoch:            c.currentEpoch,
-		EpochStartHeight:        c.epochStartHeight,
-		EpochEffectiveStake:     epochEffectiveStake,
-		MaxTxPerBlock:           c.maxTxPerBlock,
-		MaxMempoolSize:          c.maxMempoolSize,
-		MaxPendingTxPerAccount:  c.maxPendingTxPerAccount,
-		MaxMempoolTxAgeBlocks:   c.maxMempoolTxAgeBlocks,
-		MinTxFee:                c.minTxFee,
-		ProductRewardBps:        c.productRewardBps,
-		ProductChallengeMinBond: c.productChallengeMinBond,
-		ProductTreasuryBalance:  c.productTreasuryBalance,
-		ProductProofs:           productProofs,
-		ProductChallenges:       productChallenges,
-		ProductSettlements:      productSettlements,
-		ProductSignalScore:      productSignalScore,
-		ProductLastRewardEpoch:  c.lastProductRewardEpoch,
-		ProductLastRewards:      productLastRewards,
-		LastFinalizedMs:         c.lastFinalizedAt.UnixMilli(),
-		ExpiredTxTotal:          c.expiredTxTotal,
-		Accounts:                accounts,
-		Validators:              validators,
-		Delegations:             delegations,
-		Mempool:                 mempool,
-		MempoolAddedHeight:      mempoolAddedHeight,
-		Blocks:                  blocks,
+		Version:                            snapshotVersion,
+		BlockIntervalMs:                    c.blockInterval.Milliseconds(),
+		BaseReward:                         c.baseReward,
+		MinJailBlocks:                      c.minJailBlocks,
+		EpochLengthBlocks:                  c.epochLengthBlocks,
+		CurrentEpoch:                       c.currentEpoch,
+		EpochStartHeight:                   c.epochStartHeight,
+		EpochEffectiveStake:                epochEffectiveStake,
+		MaxTxPerBlock:                      c.maxTxPerBlock,
+		MaxMempoolSize:                     c.maxMempoolSize,
+		MaxPendingTxPerAccount:             c.maxPendingTxPerAccount,
+		MaxMempoolTxAgeBlocks:              c.maxMempoolTxAgeBlocks,
+		MinTxFee:                           c.minTxFee,
+		ProductRewardBps:                   c.productRewardBps,
+		ProductChallengeMinBond:            c.productChallengeMinBond,
+		ProductOracleQuorumBps:             c.productOracleQuorumBps,
+		ProductChallengeResolveDelayBlocks: c.productChallengeResolveDelayBlocks,
+		ProductAttestationTTLBlocks:        c.productAttestationTTLBlocks,
+		ProductChallengeMaxOpenBlocks:      c.productChallengeMaxOpenBlocks,
+		ProductTreasuryBalance:             c.productTreasuryBalance,
+		ProductProofs:                      productProofs,
+		ProductPendingAttestations:         productPendingAttestations,
+		ProductChallenges:                  productChallenges,
+		ProductSettlements:                 productSettlements,
+		ProductSignalScore:                 productSignalScore,
+		ProductLastRewardEpoch:             c.lastProductRewardEpoch,
+		ProductLastRewards:                 productLastRewards,
+		LastFinalizedMs:                    c.lastFinalizedAt.UnixMilli(),
+		ExpiredTxTotal:                     c.expiredTxTotal,
+		Accounts:                           accounts,
+		Validators:                         validators,
+		Delegations:                        delegations,
+		Mempool:                            mempool,
+		MempoolAddedHeight:                 mempoolAddedHeight,
+		Blocks:                             blocks,
 	}
 }
 
@@ -484,6 +515,40 @@ func chainFromSnapshot(ss Snapshot, cfg Config) (*Chain, error) {
 	if productChallengeMinBond == 0 {
 		productChallengeMinBond = defaultProductChallengeBond
 	}
+	productOracleQuorumBps := ss.ProductOracleQuorumBps
+	if cfg.ProductOracleQuorumBps > 0 {
+		productOracleQuorumBps = cfg.ProductOracleQuorumBps
+	}
+	if productOracleQuorumBps > 10_000 {
+		productOracleQuorumBps = 10_000
+	}
+	if productOracleQuorumBps == 0 {
+		productOracleQuorumBps = defaultProductOracleQuorumBps
+	}
+	if productOracleQuorumBps <= 5_000 {
+		productOracleQuorumBps = 5_001
+	}
+	productChallengeResolveDelayBlocks := ss.ProductChallengeResolveDelayBlocks
+	if cfg.ProductChallengeResolveDelayBlocks > 0 {
+		productChallengeResolveDelayBlocks = cfg.ProductChallengeResolveDelayBlocks
+	}
+	if productChallengeResolveDelayBlocks == 0 {
+		productChallengeResolveDelayBlocks = defaultProductChallengeResolveDelayBlocks
+	}
+	productAttestationTTLBlocks := ss.ProductAttestationTTLBlocks
+	if cfg.ProductAttestationTTLBlocks > 0 {
+		productAttestationTTLBlocks = cfg.ProductAttestationTTLBlocks
+	}
+	if productAttestationTTLBlocks == 0 {
+		productAttestationTTLBlocks = defaultProductAttestationTTLBlocks
+	}
+	productChallengeMaxOpenBlocks := ss.ProductChallengeMaxOpenBlocks
+	if cfg.ProductChallengeMaxOpenBlocks > 0 {
+		productChallengeMaxOpenBlocks = cfg.ProductChallengeMaxOpenBlocks
+	}
+	if productChallengeMaxOpenBlocks == 0 {
+		productChallengeMaxOpenBlocks = defaultProductChallengeMaxOpenBlocks
+	}
 
 	lastFinalizedAt := time.UnixMilli(ss.LastFinalizedMs)
 	if ss.LastFinalizedMs <= 0 {
@@ -491,40 +556,47 @@ func chainFromSnapshot(ss Snapshot, cfg Config) (*Chain, error) {
 	}
 
 	c := &Chain{
-		accounts:                accounts,
-		validators:              validators,
-		delegations:             delegations,
-		validatorOrder:          order,
-		mempool:                 append([]Transaction(nil), ss.Mempool...),
-		mempoolSet:              make(map[string]struct{}, len(ss.Mempool)),
-		mempoolAddedHeight:      make(map[string]uint64, len(ss.Mempool)),
-		blocks:                  blocks,
-		blockInterval:           blockInterval,
-		baseReward:              baseReward,
-		minJailBlocks:           minJailBlocks,
-		epochLengthBlocks:       epochLength,
-		currentEpoch:            ss.CurrentEpoch,
-		epochStartHeight:        ss.EpochStartHeight,
-		epochEffectiveStake:     make(map[string]uint64),
-		maxTxPerBlock:           maxTx,
-		maxMempoolSize:          maxMempool,
-		maxPendingTxPerAccount:  maxPendingPerAccount,
-		maxMempoolTxAgeBlocks:   maxMempoolAgeBlocks,
-		minTxFee:                minTxFee,
-		productRewardBps:        productRewardBps,
-		productChallengeMinBond: productChallengeMinBond,
-		productTreasuryBalance:  ss.ProductTreasuryBalance,
-		productProofs:           make(map[string]*ProductProof, len(ss.ProductProofs)),
-		productChallenges:       make(map[string]*ProductChallenge, len(ss.ProductChallenges)),
-		productOpenChallenges:   make(map[string]string, len(ss.ProductChallenges)),
-		productSettlements:      make(map[string]*ProductSettlement, len(ss.ProductSettlements)),
-		productSignalScore:      make(map[string]uint64, len(ss.ProductSignalScore)),
-		lastProductRewardEpoch:  ss.ProductLastRewardEpoch,
-		lastProductRewards:      make(map[string]uint64, len(ss.ProductLastRewards)),
-		finalizeHook:            cfg.FinalizeHook,
-		lastFinalizedAt:         lastFinalizedAt,
-		startedAt:               time.Now(),
-		expiredTxTotal:          ss.ExpiredTxTotal,
+		accounts:                           accounts,
+		validators:                         validators,
+		delegations:                        delegations,
+		validatorOrder:                     order,
+		mempool:                            append([]Transaction(nil), ss.Mempool...),
+		mempoolSet:                         make(map[string]struct{}, len(ss.Mempool)),
+		mempoolAddedHeight:                 make(map[string]uint64, len(ss.Mempool)),
+		blocks:                             blocks,
+		txIndex:                            make(map[string]txIndexRecord),
+		blockInterval:                      blockInterval,
+		baseReward:                         baseReward,
+		minJailBlocks:                      minJailBlocks,
+		epochLengthBlocks:                  epochLength,
+		currentEpoch:                       ss.CurrentEpoch,
+		epochStartHeight:                   ss.EpochStartHeight,
+		epochEffectiveStake:                make(map[string]uint64),
+		maxTxPerBlock:                      maxTx,
+		maxMempoolSize:                     maxMempool,
+		maxPendingTxPerAccount:             maxPendingPerAccount,
+		maxMempoolTxAgeBlocks:              maxMempoolAgeBlocks,
+		minTxFee:                           minTxFee,
+		productRewardBps:                   productRewardBps,
+		productChallengeMinBond:            productChallengeMinBond,
+		productOracleQuorumBps:             productOracleQuorumBps,
+		productChallengeResolveDelayBlocks: productChallengeResolveDelayBlocks,
+		productAttestationTTLBlocks:        productAttestationTTLBlocks,
+		productChallengeMaxOpenBlocks:      productChallengeMaxOpenBlocks,
+		productTreasuryBalance:             ss.ProductTreasuryBalance,
+		productProofs:                      make(map[string]*ProductProof, len(ss.ProductProofs)),
+		productPendingAttestations:         make(map[string]*ProductPendingAttestation, len(ss.ProductPendingAttestations)),
+		productChallenges:                  make(map[string]*ProductChallenge, len(ss.ProductChallenges)),
+		productOpenChallenges:              make(map[string]string, len(ss.ProductChallenges)),
+		productSettlements:                 make(map[string]*ProductSettlement, len(ss.ProductSettlements)),
+		productSettlementRefs:              make(map[string]string, len(ss.ProductSettlements)),
+		productSignalScore:                 make(map[string]uint64, len(ss.ProductSignalScore)),
+		lastProductRewardEpoch:             ss.ProductLastRewardEpoch,
+		lastProductRewards:                 make(map[string]uint64, len(ss.ProductLastRewards)),
+		finalizeHook:                       cfg.FinalizeHook,
+		lastFinalizedAt:                    lastFinalizedAt,
+		startedAt:                          time.Now(),
+		expiredTxTotal:                     ss.ExpiredTxTotal,
 	}
 	if c.epochStartHeight == 0 {
 		if c.epochLengthBlocks > 0 {
@@ -546,11 +618,24 @@ func chainFromSnapshot(ss Snapshot, cfg Config) (*Chain, error) {
 		copied := proof
 		c.productProofs[proof.ID] = &copied
 	}
+	for _, pending := range ss.ProductPendingAttestations {
+		if pending.ID == "" {
+			continue
+		}
+		copied := pending
+		if len(pending.Votes) > 0 {
+			copied.Votes = append([]ProductAttestationVote(nil), pending.Votes...)
+		}
+		c.productPendingAttestations[pending.ID] = &copied
+	}
 	for _, challenge := range ss.ProductChallenges {
 		if challenge.ID == "" {
 			continue
 		}
 		copied := challenge
+		if len(challenge.Votes) > 0 {
+			copied.Votes = append([]ProductChallengeVote(nil), challenge.Votes...)
+		}
 		c.productChallenges[challenge.ID] = &copied
 		if copied.Open {
 			c.productOpenChallenges[copied.ProofID] = copied.ID
@@ -562,6 +647,7 @@ func chainFromSnapshot(ss Snapshot, cfg Config) (*Chain, error) {
 		}
 		copied := settlement
 		c.productSettlements[settlement.ID] = &copied
+		c.productSettlementRefs[settlementReferenceKey(copied.Payer, copied.Reference)] = copied.ID
 	}
 	for validatorID, score := range ss.ProductSignalScore {
 		c.productSignalScore[validatorID] = score
@@ -584,6 +670,7 @@ func chainFromSnapshot(ss Snapshot, cfg Config) (*Chain, error) {
 	if err := c.validateLoadedBlocks(); err != nil {
 		return nil, err
 	}
+	c.rebuildTxIndexLocked()
 
 	c.rebuildMempoolLocked(map[string]struct{}{})
 	return c, nil

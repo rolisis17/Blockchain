@@ -98,6 +98,24 @@ Goal: connect your validator product to chain economics.
 - Done (initial): treasury-backed reward distribution policy tied to product signal score at epoch transition
 - Done (initial): fraud/challenge flow via `product_challenge` and `product_resolve_challenge` transactions (slash+jail on successful challenge)
 - Done (initial): billing/settlement endpoints and transaction path for product users (`product_settle`, quote + listing APIs)
+- Done (initial): stake-weighted oracle quorum for proof attestation and challenge resolution voting
+- Done (initial): challenge resolution delay window and pending attestation state tracking
+- Done (initial): product read-side filters for precise proof/challenge/settlement lookups
+- Done (initial): transaction indexing for fast finalized tx status lookup
+- Done (initial): read API pagination controls for product lists
+- Done (initial): idempotent product settlements keyed by payer/reference
+- Done (initial): pending transaction query endpoint for operators and integrators
+- Done (initial): direct settlement lookup by payer/reference for idempotent client flows
+- Done (initial): optional pagination metadata envelopes (`withMeta=true`) for list APIs
+- Done (initial): idempotent transaction submission retries (`POST /tx?idempotent=true`)
+- Done (initial): idempotent product settlement submit retries (`POST /product/settlements?idempotent=true`)
+- Done (initial): idempotent product attestation/challenge/resolve submit retries
+- Done (initial): advanced product/pending-tx query filters (epoch, score/amount ranges, status, time windows)
+- Done (initial): settlement lookup can include pending status for payer/reference reconciliation
+- Done (initial): finalized transaction list endpoint with filter + pagination support (`GET /tx/finalized`)
+- Done (initial): settlement stats endpoint for reconciliation totals (`GET /product/settlements/stats`)
+- Done (initial): challenge stats endpoint for fraud/review monitoring (`GET /product/challenges/stats`)
+- Done (initial): pending attestation stats endpoint for quorum-progress monitoring (`GET /product/attestations/stats`)
 
 Exit criteria:
 
@@ -156,6 +174,44 @@ Exit criteria:
    Added challenge + resolve transactions with invalidation, slash+jail, and challenger payout behavior.
 21. Done (initial): product billing and settlement APIs
    Added settlement submission/listing and billing quote endpoints for product users.
+22. Done (initial): quorum-based oracle voting
+   Added stake-weighted quorum thresholds (`productOracleQuorumBps`) for product attestation finalization and challenge resolution.
+23. Done (initial): challenge timing guardrails
+   Added `productChallengeResolveDelayBlocks`, challenge height metadata, and pending attestation visibility (`/product/attestations/pending`).
+24. Done (initial): transaction lookup endpoint
+   Added `GET /tx?id=...` to query pending/finalized transaction status and finalized block location metadata.
+25. Done (initial): product query filters for integration reads
+   Added targeted filters across product reads (`id`, `proofId`, `proofRef`, `reference`, `payer`, `challenger`, `openOnly`) to avoid full-list scans.
+26. Done (initial): finalized tx index
+   Added in-memory finalized transaction indexing so `GET /tx?id=...` lookups avoid full-chain scans and survive snapshot/sqlite reload.
+27. Done (initial): product list pagination
+   Added `offset`/`limit` pagination controls on product read endpoints (`proofs`, `pending attestations`, `challenges`, `settlements`).
+28. Done (initial): settlement idempotency guard
+   Added protocol-level duplicate settlement rejection for same `payer + reference` to prevent accidental double-charging.
+29. Done (initial): pending tx query API
+   Added `GET /tx/pending` with filters (`from`, `to`, `kind`, `validatorId`) and `offset`/`limit` pagination.
+30. Done (initial): settlement lookup endpoint
+   Added `GET /product/settlements/lookup?payer=...&reference=...` for direct retrieval of previously-settled references.
+31. Done (initial): list metadata envelopes
+   Added `withMeta=true` support for paginated read endpoints to return `items`, `total`, `offset`, `limit`, `count`, and `hasMore`.
+32. Done (initial): idempotent tx submit mode
+   Added `POST /tx?idempotent=true` duplicate-retry handling that returns existing tx state (`pending`/`finalized`) instead of failing.
+33. Done (initial): idempotent product settlement submit mode
+   Added `POST /product/settlements?idempotent=true` duplicate-retry handling that returns pending tx metadata or finalized settlement record.
+34. Done (initial): idempotent product attest/challenge/resolve submit modes
+   Added `?idempotent=true` duplicate-retry handling on `POST /product/attestations`, `POST /product/challenges`, and `POST /product/challenges/resolve`.
+35. Done (initial): advanced read filters
+   Added richer query filters for product and pending-tx endpoints (`epoch`, score/amount bounds, `successful`, time windows, fee bounds) with strict query validation.
+36. Done (initial): pending-aware settlement lookup state
+   Added `includePending=true` support on `GET /product/settlements/lookup` to return pending `txId` state before final settlement materialization.
+37. Done (initial): finalized transaction query endpoint
+   Added `GET /tx/finalized` with rich filters (`from`, `to`, `kind`, `validatorId`, fee and height bounds) and pagination metadata support.
+38. Done (initial): settlement reconciliation stats endpoint
+   Added `GET /product/settlements/stats` for aggregate `count`/`totalAmount` plus grouped totals by validator and epoch, with shared settlement filters.
+39. Done (initial): challenge monitoring stats endpoint
+   Added `GET /product/challenges/stats` for aggregate challenge counts/bond totals plus grouped challenger/resolver stats with existing challenge filters.
+40. Done (initial): pending attestation monitoring stats endpoint
+   Added `GET /product/attestations/stats` for aggregate pending-attestation stake/progress metrics with grouped validator breakdown and existing pending-attestation filters.
 
 ## Suggested milestone timeline (single engineer, part-time)
 

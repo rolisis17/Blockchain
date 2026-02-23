@@ -21,6 +21,10 @@ maxMempoolTxAgeBlocks: 120
 minTxFee: 1
 productRewardBps: 2000
 productChallengeMinBond: 10
+productOracleQuorumBps: 6667
+productChallengeResolveDelayBlocks: 1
+productAttestationTtlBlocks: 8
+productChallengeMaxOpenBlocks: 64
 productUnitPrice: 1
 
 # Set for production-like runs. Can also come from FASTPOS_ADMIN_TOKEN env.

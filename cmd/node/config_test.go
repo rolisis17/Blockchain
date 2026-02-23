@@ -50,6 +50,18 @@ func TestParseRunConfig_Defaults(t *testing.T) {
 	if cfg.ProductChallengeMinBond != 10 {
 		t.Fatalf("expected default product challenge min bond 10, got %d", cfg.ProductChallengeMinBond)
 	}
+	if cfg.ProductOracleQuorumBps != 6667 {
+		t.Fatalf("expected default product oracle quorum bps 6667, got %d", cfg.ProductOracleQuorumBps)
+	}
+	if cfg.ProductChallengeResolveDelayBlocks != 1 {
+		t.Fatalf("expected default product challenge resolve delay blocks 1, got %d", cfg.ProductChallengeResolveDelayBlocks)
+	}
+	if cfg.ProductAttestationTTLBlocks != 8 {
+		t.Fatalf("expected default product attestation ttl blocks 8, got %d", cfg.ProductAttestationTTLBlocks)
+	}
+	if cfg.ProductChallengeMaxOpenBlocks != 64 {
+		t.Fatalf("expected default product challenge max open blocks 64, got %d", cfg.ProductChallengeMaxOpenBlocks)
+	}
 	if cfg.ProductUnitPrice != 1 {
 		t.Fatalf("expected default product unit price 1, got %d", cfg.ProductUnitPrice)
 	}
@@ -73,7 +85,7 @@ func TestParseRunConfig_Defaults(t *testing.T) {
 func TestParseRunConfig_ConfigFileAndCLIOverride(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "node.yaml")
-	content := []byte("http: ':7777'\nstateBackend: 'sqlite'\nstate: './data/state.db'\nbackupDir: './data/backups-custom'\nbackupEveryBlocks: 10\nbackupRetain: 7\nblockInterval: '3s'\nminJailBlocks: 6\nepochLengthBlocks: 4\nmaxMempoolSize: 111\nmaxPendingTxPerAccount: 22\nmaxMempoolTxAgeBlocks: 30\nminTxFee: 9\nproductRewardBps: 2500\nproductChallengeMinBond: 15\nproductUnitPrice: 3\nadminToken: 'from-file'\np2pPeerBackoffInitial: '750ms'\np2pPeerBackoffMax: '9s'\np2pInboundRateLimitPerPeer: 77\np2pInboundRateWindow: '5s'\n")
+	content := []byte("http: ':7777'\nstateBackend: 'sqlite'\nstate: './data/state.db'\nbackupDir: './data/backups-custom'\nbackupEveryBlocks: 10\nbackupRetain: 7\nblockInterval: '3s'\nminJailBlocks: 6\nepochLengthBlocks: 4\nmaxMempoolSize: 111\nmaxPendingTxPerAccount: 22\nmaxMempoolTxAgeBlocks: 30\nminTxFee: 9\nproductRewardBps: 2500\nproductChallengeMinBond: 15\nproductOracleQuorumBps: 7000\nproductChallengeResolveDelayBlocks: 3\nproductAttestationTtlBlocks: 12\nproductChallengeMaxOpenBlocks: 90\nproductUnitPrice: 3\nadminToken: 'from-file'\np2pPeerBackoffInitial: '750ms'\np2pPeerBackoffMax: '9s'\np2pInboundRateLimitPerPeer: 77\np2pInboundRateWindow: '5s'\n")
 	if err := os.WriteFile(configPath, content, 0o644); err != nil {
 		t.Fatalf("write config file: %v", err)
 	}
@@ -119,6 +131,18 @@ func TestParseRunConfig_ConfigFileAndCLIOverride(t *testing.T) {
 	}
 	if cfg.ProductChallengeMinBond != 15 {
 		t.Fatalf("expected product challenge min bond from file 15, got %d", cfg.ProductChallengeMinBond)
+	}
+	if cfg.ProductOracleQuorumBps != 7000 {
+		t.Fatalf("expected product oracle quorum bps from file 7000, got %d", cfg.ProductOracleQuorumBps)
+	}
+	if cfg.ProductChallengeResolveDelayBlocks != 3 {
+		t.Fatalf("expected product challenge resolve delay blocks from file 3, got %d", cfg.ProductChallengeResolveDelayBlocks)
+	}
+	if cfg.ProductAttestationTTLBlocks != 12 {
+		t.Fatalf("expected product attestation ttl blocks from file 12, got %d", cfg.ProductAttestationTTLBlocks)
+	}
+	if cfg.ProductChallengeMaxOpenBlocks != 90 {
+		t.Fatalf("expected product challenge max open blocks from file 90, got %d", cfg.ProductChallengeMaxOpenBlocks)
 	}
 	if cfg.ProductUnitPrice != 3 {
 		t.Fatalf("expected product unit price from file 3, got %d", cfg.ProductUnitPrice)
@@ -244,5 +268,37 @@ func TestParseRunConfig_P2PValidationAndPeers(t *testing.T) {
 	}, "")
 	if err == nil {
 		t.Fatalf("expected parse error when backups are enabled with empty backup dir")
+	}
+
+	_, err = parseRunConfig([]string{
+		"node",
+		"-product-oracle-quorum-bps", "5000",
+	}, "")
+	if err == nil {
+		t.Fatalf("expected parse error when product oracle quorum bps is <= 5000")
+	}
+
+	_, err = parseRunConfig([]string{
+		"node",
+		"-product-challenge-resolve-delay-blocks", "0",
+	}, "")
+	if err == nil {
+		t.Fatalf("expected parse error when challenge resolve delay blocks is 0")
+	}
+
+	_, err = parseRunConfig([]string{
+		"node",
+		"-product-attestation-ttl-blocks", "0",
+	}, "")
+	if err == nil {
+		t.Fatalf("expected parse error when product attestation ttl blocks is 0")
+	}
+
+	_, err = parseRunConfig([]string{
+		"node",
+		"-product-challenge-max-open-blocks", "0",
+	}, "")
+	if err == nil {
+		t.Fatalf("expected parse error when product challenge max open blocks is 0")
 	}
 }

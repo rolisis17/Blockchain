@@ -1,6 +1,7 @@
 package chain
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -106,6 +107,17 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	if len(blocksLoaded) != len(blocksOriginal) {
 		t.Fatalf("block count mismatch after load")
 	}
+
+	lookup, ok := loaded.GetTransaction(tx.ID())
+	if !ok {
+		t.Fatalf("expected tx lookup to succeed after snapshot load")
+	}
+	if lookup.State != TxStateFinalized {
+		t.Fatalf("expected finalized tx state after snapshot load, got %q", lookup.State)
+	}
+	if lookup.Finalized == nil || lookup.Finalized.Height == 0 {
+		t.Fatalf("expected finalized tx location metadata after snapshot load")
+	}
 }
 
 func TestSQLiteSnapshotRoundTrip(t *testing.T) {
@@ -195,6 +207,17 @@ func TestSQLiteSnapshotRoundTrip(t *testing.T) {
 	if len(blocksLoaded) != len(blocksOriginal) {
 		t.Fatalf("block count mismatch after sqlite load")
 	}
+
+	lookup, ok := loaded.GetTransaction(tx.ID())
+	if !ok {
+		t.Fatalf("expected tx lookup to succeed after sqlite snapshot load")
+	}
+	if lookup.State != TxStateFinalized {
+		t.Fatalf("expected finalized tx state after sqlite load, got %q", lookup.State)
+	}
+	if lookup.Finalized == nil || lookup.Finalized.Height == 0 {
+		t.Fatalf("expected finalized tx location metadata after sqlite load")
+	}
 }
 
 func TestLoadSQLiteSnapshotMissingState(t *testing.T) {
@@ -203,4 +226,96 @@ func TestLoadSQLiteSnapshotMissingState(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected missing sqlite snapshot error")
 	}
+}
+
+func TestSnapshotReloadRetainsSettlementIdempotency(t *testing.T) {
+	pub, _, valAddr, err := DeterministicKeypair("persist-settle-val")
+	if err != nil {
+		t.Fatalf("validator keypair: %v", err)
+	}
+	_, alicePriv, aliceAddr, err := DeterministicKeypair("persist-settle-alice")
+	if err != nil {
+		t.Fatalf("alice keypair: %v", err)
+	}
+
+	makeChain := func() *Chain {
+		c, err := New(Config{
+			BaseReward: 0,
+			MinTxFee:   1,
+			GenesisAccounts: map[Address]uint64{
+				valAddr:   1_000,
+				aliceAddr: 1_000,
+			},
+			GenesisValidators: []GenesisValidator{
+				{ID: "v1", PubKey: pub, Stake: 1_000, WorkWeight: 100, Active: true},
+			},
+		})
+		if err != nil {
+			t.Fatalf("new chain: %v", err)
+		}
+		return c
+	}
+
+	submitSettlement := func(t *testing.T, c *Chain, nonce uint64, ts int64) {
+		t.Helper()
+		tx := Transaction{
+			Kind:      TxKindProductSettle,
+			To:        Address("invoice-persist"),
+			Amount:    100,
+			Fee:       1,
+			Nonce:     nonce,
+			Timestamp: ts,
+		}
+		if err := SignTransaction(&tx, alicePriv); err != nil {
+			t.Fatalf("sign settlement tx: %v", err)
+		}
+		if _, err := c.SubmitTx(tx); err != nil {
+			t.Fatalf("submit settlement tx: %v", err)
+		}
+		if _, err := c.ProduceOnce(); err != nil {
+			t.Fatalf("produce settlement block: %v", err)
+		}
+	}
+
+	assertDuplicateRejected := func(t *testing.T, c *Chain, nonce uint64, ts int64) {
+		t.Helper()
+		dup := Transaction{
+			Kind:      TxKindProductSettle,
+			To:        Address("invoice-persist"),
+			Amount:    100,
+			Fee:       1,
+			Nonce:     nonce,
+			Timestamp: ts,
+		}
+		if err := SignTransaction(&dup, alicePriv); err != nil {
+			t.Fatalf("sign duplicate settlement tx: %v", err)
+		}
+		if _, err := c.SubmitTx(dup); !errors.Is(err, ErrProductSettlementDuplicate) {
+			t.Fatalf("expected ErrProductSettlementDuplicate, got %v", err)
+		}
+	}
+
+	original := makeChain()
+	submitSettlement(t, original, 1, 1_700_000_300_001)
+	snapshotPath := filepath.Join(t.TempDir(), "state.json")
+	if err := original.SaveSnapshot(snapshotPath); err != nil {
+		t.Fatalf("save snapshot: %v", err)
+	}
+	loadedSnapshot, err := LoadSnapshot(snapshotPath, Config{})
+	if err != nil {
+		t.Fatalf("load snapshot: %v", err)
+	}
+	assertDuplicateRejected(t, loadedSnapshot, 2, 1_700_000_300_002)
+
+	originalSQLite := makeChain()
+	submitSettlement(t, originalSQLite, 1, 1_700_000_300_011)
+	sqlitePath := filepath.Join(t.TempDir(), "state.db")
+	if err := originalSQLite.SaveSQLiteSnapshot(sqlitePath); err != nil {
+		t.Fatalf("save sqlite snapshot: %v", err)
+	}
+	loadedSQLite, err := LoadSQLiteSnapshot(sqlitePath, Config{})
+	if err != nil {
+		t.Fatalf("load sqlite snapshot: %v", err)
+	}
+	assertDuplicateRejected(t, loadedSQLite, 2, 1_700_000_300_012)
 }

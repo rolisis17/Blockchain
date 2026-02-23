@@ -17,74 +17,82 @@ const (
 )
 
 type runConfig struct {
-	ConfigPath              string
-	HTTPAddr                string
-	GenesisPath             string
-	StateBackend            string
-	StatePath               string
-	BackupDir               string
-	BackupEveryBlocks       uint64
-	BackupRetain            int
-	BlockInterval           time.Duration
-	BaseReward              uint64
-	MinJailBlocks           uint64
-	EpochLengthBlocks       uint64
-	MaxTxPerBlock           int
-	MaxMempoolSize          int
-	MaxPendingPerAccount    int
-	MaxMempoolAgeBlocks     uint64
-	MinTxFee                uint64
-	ProductRewardBps        uint64
-	ProductChallengeMinBond uint64
-	ProductUnitPrice        uint64
-	AdminToken              string
-	AllowDevSigning         bool
-	ReadinessMaxLag         time.Duration
-	P2PEnabled              bool
-	NodeID                  string
-	ValidatorPrivateKey     string
-	Peers                   []string
-	P2PProposerTimeout      uint64
-	P2PMaxRoundLookahead    uint64
-	P2PPeerBackoffInit      time.Duration
-	P2PPeerBackoffMax       time.Duration
-	P2PInboundRateLimit     uint64
-	P2PInboundRateWindow    time.Duration
+	ConfigPath                         string
+	HTTPAddr                           string
+	GenesisPath                        string
+	StateBackend                       string
+	StatePath                          string
+	BackupDir                          string
+	BackupEveryBlocks                  uint64
+	BackupRetain                       int
+	BlockInterval                      time.Duration
+	BaseReward                         uint64
+	MinJailBlocks                      uint64
+	EpochLengthBlocks                  uint64
+	MaxTxPerBlock                      int
+	MaxMempoolSize                     int
+	MaxPendingPerAccount               int
+	MaxMempoolAgeBlocks                uint64
+	MinTxFee                           uint64
+	ProductRewardBps                   uint64
+	ProductChallengeMinBond            uint64
+	ProductOracleQuorumBps             uint64
+	ProductChallengeResolveDelayBlocks uint64
+	ProductAttestationTTLBlocks        uint64
+	ProductChallengeMaxOpenBlocks      uint64
+	ProductUnitPrice                   uint64
+	AdminToken                         string
+	AllowDevSigning                    bool
+	ReadinessMaxLag                    time.Duration
+	P2PEnabled                         bool
+	NodeID                             string
+	ValidatorPrivateKey                string
+	Peers                              []string
+	P2PProposerTimeout                 uint64
+	P2PMaxRoundLookahead               uint64
+	P2PPeerBackoffInit                 time.Duration
+	P2PPeerBackoffMax                  time.Duration
+	P2PInboundRateLimit                uint64
+	P2PInboundRateWindow               time.Duration
 }
 
 type fileConfig struct {
-	HTTPAddr                *string  `yaml:"http"`
-	GenesisPath             *string  `yaml:"genesis"`
-	StateBackend            *string  `yaml:"stateBackend"`
-	StatePath               *string  `yaml:"state"`
-	BackupDir               *string  `yaml:"backupDir"`
-	BackupEveryBlocks       *uint64  `yaml:"backupEveryBlocks"`
-	BackupRetain            *int     `yaml:"backupRetain"`
-	BlockInterval           *string  `yaml:"blockInterval"`
-	BaseReward              *uint64  `yaml:"baseReward"`
-	MinJailBlocks           *uint64  `yaml:"minJailBlocks"`
-	EpochLengthBlocks       *uint64  `yaml:"epochLengthBlocks"`
-	MaxTxPerBlock           *int     `yaml:"maxTxPerBlock"`
-	MaxMempoolSize          *int     `yaml:"maxMempoolSize"`
-	MaxPendingPerAccount    *int     `yaml:"maxPendingTxPerAccount"`
-	MaxMempoolAgeBlocks     *uint64  `yaml:"maxMempoolTxAgeBlocks"`
-	MinTxFee                *uint64  `yaml:"minTxFee"`
-	ProductRewardBps        *uint64  `yaml:"productRewardBps"`
-	ProductChallengeMinBond *uint64  `yaml:"productChallengeMinBond"`
-	ProductUnitPrice        *uint64  `yaml:"productUnitPrice"`
-	AdminToken              *string  `yaml:"adminToken"`
-	AllowDevSigning         *bool    `yaml:"allowDevSigning"`
-	ReadinessMaxLag         *string  `yaml:"readinessMaxLag"`
-	P2PEnabled              *bool    `yaml:"p2pEnabled"`
-	NodeID                  *string  `yaml:"nodeId"`
-	ValidatorPrivateKey     *string  `yaml:"validatorPrivateKey"`
-	Peers                   []string `yaml:"peers"`
-	P2PProposerTimeout      *uint64  `yaml:"p2pProposerTimeoutTicks"`
-	P2PMaxRoundLookahead    *uint64  `yaml:"p2pMaxRoundLookahead"`
-	P2PPeerBackoffInit      *string  `yaml:"p2pPeerBackoffInitial"`
-	P2PPeerBackoffMax       *string  `yaml:"p2pPeerBackoffMax"`
-	P2PInboundRateLimit     *uint64  `yaml:"p2pInboundRateLimitPerPeer"`
-	P2PInboundRateWindow    *string  `yaml:"p2pInboundRateWindow"`
+	HTTPAddr                           *string  `yaml:"http"`
+	GenesisPath                        *string  `yaml:"genesis"`
+	StateBackend                       *string  `yaml:"stateBackend"`
+	StatePath                          *string  `yaml:"state"`
+	BackupDir                          *string  `yaml:"backupDir"`
+	BackupEveryBlocks                  *uint64  `yaml:"backupEveryBlocks"`
+	BackupRetain                       *int     `yaml:"backupRetain"`
+	BlockInterval                      *string  `yaml:"blockInterval"`
+	BaseReward                         *uint64  `yaml:"baseReward"`
+	MinJailBlocks                      *uint64  `yaml:"minJailBlocks"`
+	EpochLengthBlocks                  *uint64  `yaml:"epochLengthBlocks"`
+	MaxTxPerBlock                      *int     `yaml:"maxTxPerBlock"`
+	MaxMempoolSize                     *int     `yaml:"maxMempoolSize"`
+	MaxPendingPerAccount               *int     `yaml:"maxPendingTxPerAccount"`
+	MaxMempoolAgeBlocks                *uint64  `yaml:"maxMempoolTxAgeBlocks"`
+	MinTxFee                           *uint64  `yaml:"minTxFee"`
+	ProductRewardBps                   *uint64  `yaml:"productRewardBps"`
+	ProductChallengeMinBond            *uint64  `yaml:"productChallengeMinBond"`
+	ProductOracleQuorumBps             *uint64  `yaml:"productOracleQuorumBps"`
+	ProductChallengeResolveDelayBlocks *uint64  `yaml:"productChallengeResolveDelayBlocks"`
+	ProductAttestationTTLBlocks        *uint64  `yaml:"productAttestationTtlBlocks"`
+	ProductChallengeMaxOpenBlocks      *uint64  `yaml:"productChallengeMaxOpenBlocks"`
+	ProductUnitPrice                   *uint64  `yaml:"productUnitPrice"`
+	AdminToken                         *string  `yaml:"adminToken"`
+	AllowDevSigning                    *bool    `yaml:"allowDevSigning"`
+	ReadinessMaxLag                    *string  `yaml:"readinessMaxLag"`
+	P2PEnabled                         *bool    `yaml:"p2pEnabled"`
+	NodeID                             *string  `yaml:"nodeId"`
+	ValidatorPrivateKey                *string  `yaml:"validatorPrivateKey"`
+	Peers                              []string `yaml:"peers"`
+	P2PProposerTimeout                 *uint64  `yaml:"p2pProposerTimeoutTicks"`
+	P2PMaxRoundLookahead               *uint64  `yaml:"p2pMaxRoundLookahead"`
+	P2PPeerBackoffInit                 *string  `yaml:"p2pPeerBackoffInitial"`
+	P2PPeerBackoffMax                  *string  `yaml:"p2pPeerBackoffMax"`
+	P2PInboundRateLimit                *uint64  `yaml:"p2pInboundRateLimitPerPeer"`
+	P2PInboundRateWindow               *string  `yaml:"p2pInboundRateWindow"`
 }
 
 func parseRunConfig(args []string, envAdminToken string) (runConfig, error) {
@@ -121,6 +129,10 @@ func parseRunConfig(args []string, envAdminToken string) (runConfig, error) {
 	fs.Uint64Var(&cfg.MinTxFee, "min-tx-fee", cfg.MinTxFee, "minimum transaction fee accepted into mempool")
 	fs.Uint64Var(&cfg.ProductRewardBps, "product-reward-bps", cfg.ProductRewardBps, "portion of product treasury paid each epoch in basis points (0..10000)")
 	fs.Uint64Var(&cfg.ProductChallengeMinBond, "product-challenge-min-bond", cfg.ProductChallengeMinBond, "minimum bond for product challenge transaction")
+	fs.Uint64Var(&cfg.ProductOracleQuorumBps, "product-oracle-quorum-bps", cfg.ProductOracleQuorumBps, "oracle quorum threshold in basis points for product attestation/challenge resolution")
+	fs.Uint64Var(&cfg.ProductChallengeResolveDelayBlocks, "product-challenge-resolve-delay-blocks", cfg.ProductChallengeResolveDelayBlocks, "minimum finalized blocks between challenge creation and resolution")
+	fs.Uint64Var(&cfg.ProductAttestationTTLBlocks, "product-attestation-ttl-blocks", cfg.ProductAttestationTTLBlocks, "max block age for pending product attestations before expiry")
+	fs.Uint64Var(&cfg.ProductChallengeMaxOpenBlocks, "product-challenge-max-open-blocks", cfg.ProductChallengeMaxOpenBlocks, "max block age for open product challenges before timeout close")
 	fs.Uint64Var(&cfg.ProductUnitPrice, "product-unit-price", cfg.ProductUnitPrice, "billing quote unit price for product settlement API")
 	fs.StringVar(&cfg.AdminToken, "admin-token", cfg.AdminToken, "admin token for validator control endpoints")
 	fs.BoolVar(&cfg.AllowDevSigning, "allow-dev-signing", cfg.AllowDevSigning, "enable unsafe server-side signing endpoints")
@@ -163,6 +175,18 @@ func parseRunConfig(args []string, envAdminToken string) (runConfig, error) {
 	}
 	if cfg.ProductChallengeMinBond == 0 {
 		return runConfig{}, errors.New("product-challenge-min-bond must be > 0")
+	}
+	if cfg.ProductOracleQuorumBps <= 5_000 || cfg.ProductOracleQuorumBps > 10_000 {
+		return runConfig{}, errors.New("product-oracle-quorum-bps must be in [5001,10000]")
+	}
+	if cfg.ProductChallengeResolveDelayBlocks == 0 {
+		return runConfig{}, errors.New("product-challenge-resolve-delay-blocks must be > 0")
+	}
+	if cfg.ProductAttestationTTLBlocks == 0 {
+		return runConfig{}, errors.New("product-attestation-ttl-blocks must be > 0")
+	}
+	if cfg.ProductChallengeMaxOpenBlocks == 0 {
+		return runConfig{}, errors.New("product-challenge-max-open-blocks must be > 0")
 	}
 	if cfg.ProductUnitPrice == 0 {
 		return runConfig{}, errors.New("product-unit-price must be > 0")
@@ -212,38 +236,42 @@ func parseRunConfig(args []string, envAdminToken string) (runConfig, error) {
 
 func defaultRunConfig(adminToken string) runConfig {
 	return runConfig{
-		ConfigPath:              "",
-		HTTPAddr:                ":8080",
-		GenesisPath:             "",
-		StateBackend:            stateBackendSnapshot,
-		StatePath:               "./data/state.json",
-		BackupDir:               "./data/backups",
-		BackupEveryBlocks:       0,
-		BackupRetain:            20,
-		BlockInterval:           2 * time.Second,
-		BaseReward:              1,
-		MinJailBlocks:           0,
-		EpochLengthBlocks:       1,
-		MaxTxPerBlock:           500,
-		MaxMempoolSize:          20_000,
-		MaxPendingPerAccount:    64,
-		MaxMempoolAgeBlocks:     120,
-		MinTxFee:                1,
-		ProductRewardBps:        2_000,
-		ProductChallengeMinBond: 10,
-		ProductUnitPrice:        1,
-		AdminToken:              adminToken,
-		AllowDevSigning:         false,
-		ReadinessMaxLag:         0,
-		P2PEnabled:              false,
-		NodeID:                  "",
-		Peers:                   nil,
-		P2PProposerTimeout:      2,
-		P2PMaxRoundLookahead:    16,
-		P2PPeerBackoffInit:      500 * time.Millisecond,
-		P2PPeerBackoffMax:       15 * time.Second,
-		P2PInboundRateLimit:     120,
-		P2PInboundRateWindow:    time.Second,
+		ConfigPath:                         "",
+		HTTPAddr:                           ":8080",
+		GenesisPath:                        "",
+		StateBackend:                       stateBackendSnapshot,
+		StatePath:                          "./data/state.json",
+		BackupDir:                          "./data/backups",
+		BackupEveryBlocks:                  0,
+		BackupRetain:                       20,
+		BlockInterval:                      2 * time.Second,
+		BaseReward:                         1,
+		MinJailBlocks:                      0,
+		EpochLengthBlocks:                  1,
+		MaxTxPerBlock:                      500,
+		MaxMempoolSize:                     20_000,
+		MaxPendingPerAccount:               64,
+		MaxMempoolAgeBlocks:                120,
+		MinTxFee:                           1,
+		ProductRewardBps:                   2_000,
+		ProductChallengeMinBond:            10,
+		ProductOracleQuorumBps:             6_667,
+		ProductChallengeResolveDelayBlocks: 1,
+		ProductAttestationTTLBlocks:        8,
+		ProductChallengeMaxOpenBlocks:      64,
+		ProductUnitPrice:                   1,
+		AdminToken:                         adminToken,
+		AllowDevSigning:                    false,
+		ReadinessMaxLag:                    0,
+		P2PEnabled:                         false,
+		NodeID:                             "",
+		Peers:                              nil,
+		P2PProposerTimeout:                 2,
+		P2PMaxRoundLookahead:               16,
+		P2PPeerBackoffInit:                 500 * time.Millisecond,
+		P2PPeerBackoffMax:                  15 * time.Second,
+		P2PInboundRateLimit:                120,
+		P2PInboundRateWindow:               time.Second,
 	}
 }
 
@@ -341,6 +369,18 @@ func applyConfigFile(path string, cfg *runConfig) error {
 	}
 	if fc.ProductChallengeMinBond != nil {
 		cfg.ProductChallengeMinBond = *fc.ProductChallengeMinBond
+	}
+	if fc.ProductOracleQuorumBps != nil {
+		cfg.ProductOracleQuorumBps = *fc.ProductOracleQuorumBps
+	}
+	if fc.ProductChallengeResolveDelayBlocks != nil {
+		cfg.ProductChallengeResolveDelayBlocks = *fc.ProductChallengeResolveDelayBlocks
+	}
+	if fc.ProductAttestationTTLBlocks != nil {
+		cfg.ProductAttestationTTLBlocks = *fc.ProductAttestationTTLBlocks
+	}
+	if fc.ProductChallengeMaxOpenBlocks != nil {
+		cfg.ProductChallengeMaxOpenBlocks = *fc.ProductChallengeMaxOpenBlocks
 	}
 	if fc.ProductUnitPrice != nil {
 		cfg.ProductUnitPrice = *fc.ProductUnitPrice

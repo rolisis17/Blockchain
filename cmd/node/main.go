@@ -29,17 +29,21 @@ func main() {
 	}
 
 	chainCfg := chain.Config{
-		BlockInterval:           cfg.BlockInterval,
-		BaseReward:              cfg.BaseReward,
-		MinJailBlocks:           cfg.MinJailBlocks,
-		EpochLengthBlocks:       cfg.EpochLengthBlocks,
-		MaxTxPerBlock:           cfg.MaxTxPerBlock,
-		MaxMempoolSize:          cfg.MaxMempoolSize,
-		MaxPendingTxPerAccount:  cfg.MaxPendingPerAccount,
-		MaxMempoolTxAgeBlocks:   cfg.MaxMempoolAgeBlocks,
-		MinTxFee:                cfg.MinTxFee,
-		ProductRewardBps:        cfg.ProductRewardBps,
-		ProductChallengeMinBond: cfg.ProductChallengeMinBond,
+		BlockInterval:                      cfg.BlockInterval,
+		BaseReward:                         cfg.BaseReward,
+		MinJailBlocks:                      cfg.MinJailBlocks,
+		EpochLengthBlocks:                  cfg.EpochLengthBlocks,
+		MaxTxPerBlock:                      cfg.MaxTxPerBlock,
+		MaxMempoolSize:                     cfg.MaxMempoolSize,
+		MaxPendingTxPerAccount:             cfg.MaxPendingPerAccount,
+		MaxMempoolTxAgeBlocks:              cfg.MaxMempoolAgeBlocks,
+		MinTxFee:                           cfg.MinTxFee,
+		ProductRewardBps:                   cfg.ProductRewardBps,
+		ProductChallengeMinBond:            cfg.ProductChallengeMinBond,
+		ProductOracleQuorumBps:             cfg.ProductOracleQuorumBps,
+		ProductChallengeResolveDelayBlocks: cfg.ProductChallengeResolveDelayBlocks,
+		ProductAttestationTTLBlocks:        cfg.ProductAttestationTTLBlocks,
+		ProductChallengeMaxOpenBlocks:      cfg.ProductChallengeMaxOpenBlocks,
 	}
 
 	c, boot, err := buildChain(chainCfg, cfg.GenesisPath, cfg.StateBackend, cfg.StatePath)
@@ -151,7 +155,16 @@ func main() {
 	log.Printf("backup config dir=%s everyBlocks=%d retain=%d", cfg.BackupDir, cfg.BackupEveryBlocks, cfg.BackupRetain)
 	log.Printf("min jail blocks=%d", c.MinJailBlocks())
 	log.Printf("epoch length blocks=%d", cfg.EpochLengthBlocks)
-	log.Printf("product reward bps=%d challenge min bond=%d unit price=%d", cfg.ProductRewardBps, cfg.ProductChallengeMinBond, cfg.ProductUnitPrice)
+	log.Printf(
+		"product reward bps=%d challenge min bond=%d oracle quorum bps=%d challenge resolve delay blocks=%d attestation ttl blocks=%d challenge max-open blocks=%d unit price=%d",
+		cfg.ProductRewardBps,
+		cfg.ProductChallengeMinBond,
+		cfg.ProductOracleQuorumBps,
+		cfg.ProductChallengeResolveDelayBlocks,
+		cfg.ProductAttestationTTLBlocks,
+		cfg.ProductChallengeMaxOpenBlocks,
+		cfg.ProductUnitPrice,
+	)
 	log.Printf("mempool controls max-size=%d max-pending-per-account=%d max-age-blocks=%d", cfg.MaxMempoolSize, cfg.MaxPendingPerAccount, cfg.MaxMempoolAgeBlocks)
 	if boot.LoadedFromSnapshot {
 		log.Printf("chain loaded from %s state: %s", boot.GenesisSource, boot.SnapshotPath)

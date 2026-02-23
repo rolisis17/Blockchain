@@ -1,6 +1,7 @@
 package chain
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 )
@@ -253,6 +254,98 @@ func TestProductSettlementAttestationChallengeFlow(t *testing.T) {
 	}
 }
 
+func TestProductSettlementRejectsDuplicateReferencePerPayer(t *testing.T) {
+	pub, _, valAddr, err := DeterministicKeypair("product-settle-idempotent-v1")
+	if err != nil {
+		t.Fatalf("validator keypair: %v", err)
+	}
+	_, alicePriv, aliceAddr, err := DeterministicKeypair("product-settle-idempotent-alice")
+	if err != nil {
+		t.Fatalf("alice keypair: %v", err)
+	}
+	_, bobPriv, bobAddr, err := DeterministicKeypair("product-settle-idempotent-bob")
+	if err != nil {
+		t.Fatalf("bob keypair: %v", err)
+	}
+
+	c, err := New(Config{
+		BaseReward:              0,
+		MinTxFee:                1,
+		ProductChallengeMinBond: 10,
+		GenesisTimestampMs:      1_700_000_100_000,
+		GenesisAccounts: map[Address]uint64{
+			valAddr:   1_000,
+			aliceAddr: 1_000,
+			bobAddr:   1_000,
+		},
+		GenesisValidators: []GenesisValidator{
+			{ID: "v1", PubKey: pub, Stake: 1_000, WorkWeight: 100, Active: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new chain: %v", err)
+	}
+
+	first := Transaction{
+		Kind:      TxKindProductSettle,
+		To:        Address("invoice-42"),
+		Amount:    100,
+		Fee:       1,
+		Nonce:     1,
+		Timestamp: 1_700_000_100_001,
+	}
+	if err := SignTransaction(&first, alicePriv); err != nil {
+		t.Fatalf("sign first settlement: %v", err)
+	}
+	if _, err := c.SubmitTx(first); err != nil {
+		t.Fatalf("submit first settlement: %v", err)
+	}
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce first settlement block: %v", err)
+	}
+
+	duplicate := Transaction{
+		Kind:      TxKindProductSettle,
+		To:        Address("invoice-42"),
+		Amount:    100,
+		Fee:       1,
+		Nonce:     2,
+		Timestamp: 1_700_000_100_002,
+	}
+	if err := SignTransaction(&duplicate, alicePriv); err != nil {
+		t.Fatalf("sign duplicate settlement: %v", err)
+	}
+	if _, err := c.SubmitTx(duplicate); !errors.Is(err, ErrProductSettlementDuplicate) {
+		t.Fatalf("expected ErrProductSettlementDuplicate, got %v", err)
+	}
+
+	otherPayer := Transaction{
+		Kind:      TxKindProductSettle,
+		To:        Address("invoice-42"),
+		Amount:    80,
+		Fee:       1,
+		Nonce:     1,
+		Timestamp: 1_700_000_100_003,
+	}
+	if err := SignTransaction(&otherPayer, bobPriv); err != nil {
+		t.Fatalf("sign other payer settlement: %v", err)
+	}
+	if _, err := c.SubmitTx(otherPayer); err != nil {
+		t.Fatalf("submit other payer settlement: %v", err)
+	}
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce other payer settlement block: %v", err)
+	}
+
+	settlements := c.GetProductSettlements()
+	if len(settlements) != 2 {
+		t.Fatalf("expected 2 settlements total, got %d", len(settlements))
+	}
+	if c.GetProductStatus().TreasuryBalance != 180 {
+		t.Fatalf("expected treasury balance 180 after unique settlements, got %d", c.GetProductStatus().TreasuryBalance)
+	}
+}
+
 func TestProductSnapshotRoundTrip(t *testing.T) {
 	pub, valPriv, valAddr, err := DeterministicKeypair("product-snapshot-v1")
 	if err != nil {
@@ -349,5 +442,429 @@ func TestProductSnapshotRoundTrip(t *testing.T) {
 	}
 	if loadedEpoch.Length != origEpoch.Length {
 		t.Fatalf("epoch length mismatch after load: got %d want %d", loadedEpoch.Length, origEpoch.Length)
+	}
+}
+
+func TestProductAttestationRequiresOracleQuorum(t *testing.T) {
+	pub1, priv1, addr1, err := DeterministicKeypair("attest-quorum-v1")
+	if err != nil {
+		t.Fatalf("validator v1 keypair: %v", err)
+	}
+	pub2, priv2, addr2, err := DeterministicKeypair("attest-quorum-v2")
+	if err != nil {
+		t.Fatalf("validator v2 keypair: %v", err)
+	}
+
+	c, err := New(Config{
+		BaseReward:             0,
+		MinTxFee:               1,
+		EpochLengthBlocks:      10,
+		ProductOracleQuorumBps: 7000,
+		GenesisTimestampMs:     1_700_000_000_000,
+		GenesisAccounts: map[Address]uint64{
+			addr1: 1_000,
+			addr2: 1_000,
+		},
+		GenesisValidators: []GenesisValidator{
+			{ID: "v1", PubKey: pub1, Stake: 1_000, WorkWeight: 100, Active: true},
+			{ID: "v2", PubKey: pub2, Stake: 1_000, WorkWeight: 100, Active: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new chain: %v", err)
+	}
+
+	attestV1 := Transaction{
+		Kind:        TxKindProductAttest,
+		To:          Address("proof-quorum"),
+		Amount:      10,
+		Fee:         1,
+		Nonce:       1,
+		Timestamp:   1_700_000_000_001,
+		ValidatorID: "v1",
+		BasisPoints: 9000,
+	}
+	if err := SignTransaction(&attestV1, priv1); err != nil {
+		t.Fatalf("sign attest tx v1: %v", err)
+	}
+	if _, err := c.SubmitTx(attestV1); err != nil {
+		t.Fatalf("submit attest tx v1: %v", err)
+	}
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce attestation block v1: %v", err)
+	}
+
+	if len(c.GetProductProofs()) != 0 {
+		t.Fatalf("expected no finalized proof with only one oracle vote")
+	}
+	pending := c.GetProductPendingAttestations()
+	if len(pending) != 1 {
+		t.Fatalf("expected 1 pending attestation after first vote, got %d", len(pending))
+	}
+
+	attestV2 := Transaction{
+		Kind:        TxKindProductAttest,
+		To:          Address("proof-quorum"),
+		Amount:      10,
+		Fee:         1,
+		Nonce:       1,
+		Timestamp:   1_700_000_000_002,
+		ValidatorID: "v1",
+		BasisPoints: 9000,
+	}
+	if err := SignTransaction(&attestV2, priv2); err != nil {
+		t.Fatalf("sign attest tx v2: %v", err)
+	}
+	if _, err := c.SubmitTx(attestV2); err != nil {
+		t.Fatalf("submit attest tx v2: %v", err)
+	}
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce attestation block v2: %v", err)
+	}
+
+	proofs := c.GetProductProofs()
+	if len(proofs) != 1 {
+		t.Fatalf("expected 1 finalized proof after quorum, got %d", len(proofs))
+	}
+	if proofs[0].Attestations != 2 {
+		t.Fatalf("expected 2 attestations on finalized proof, got %d", proofs[0].Attestations)
+	}
+	if len(c.GetProductPendingAttestations()) != 0 {
+		t.Fatalf("expected no pending attestations after quorum finalization")
+	}
+}
+
+func TestProductChallengeResolveDelayEnforced(t *testing.T) {
+	pub, valPriv, valAddr, err := DeterministicKeypair("resolve-delay-v1")
+	if err != nil {
+		t.Fatalf("validator keypair: %v", err)
+	}
+	_, alicePriv, aliceAddr, err := DeterministicKeypair("resolve-delay-alice")
+	if err != nil {
+		t.Fatalf("alice keypair: %v", err)
+	}
+
+	c, err := New(Config{
+		BaseReward:                         0,
+		MinTxFee:                           1,
+		ProductChallengeResolveDelayBlocks: 2,
+		ProductChallengeMinBond:            10,
+		GenesisTimestampMs:                 1_700_000_000_000,
+		GenesisAccounts: map[Address]uint64{
+			valAddr:   1_000,
+			aliceAddr: 1_000,
+		},
+		GenesisValidators: []GenesisValidator{
+			{ID: "v1", PubKey: pub, Stake: 1_000, WorkWeight: 100, Active: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new chain: %v", err)
+	}
+
+	settleTx := Transaction{
+		Kind:      TxKindProductSettle,
+		To:        Address("order-delay"),
+		Amount:    100,
+		Fee:       1,
+		Nonce:     1,
+		Timestamp: 1_700_000_000_001,
+	}
+	if err := SignTransaction(&settleTx, alicePriv); err != nil {
+		t.Fatalf("sign settle tx: %v", err)
+	}
+	if _, err := c.SubmitTx(settleTx); err != nil {
+		t.Fatalf("submit settle tx: %v", err)
+	}
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce settle block: %v", err)
+	}
+
+	attestTx := Transaction{
+		Kind:        TxKindProductAttest,
+		To:          Address("proof-delay"),
+		Amount:      10,
+		Fee:         1,
+		Nonce:       1,
+		Timestamp:   1_700_000_000_002,
+		ValidatorID: "v1",
+		BasisPoints: 9000,
+	}
+	if err := SignTransaction(&attestTx, valPriv); err != nil {
+		t.Fatalf("sign attest tx: %v", err)
+	}
+	if _, err := c.SubmitTx(attestTx); err != nil {
+		t.Fatalf("submit attest tx: %v", err)
+	}
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce attest block: %v", err)
+	}
+
+	proofs := c.GetProductProofs()
+	if len(proofs) != 1 {
+		t.Fatalf("expected 1 proof before challenge, got %d", len(proofs))
+	}
+
+	challengeTx := Transaction{
+		Kind:      TxKindProductChallenge,
+		To:        Address(proofs[0].ID),
+		Amount:    20,
+		Fee:       1,
+		Nonce:     2,
+		Timestamp: 1_700_000_000_003,
+	}
+	if err := SignTransaction(&challengeTx, alicePriv); err != nil {
+		t.Fatalf("sign challenge tx: %v", err)
+	}
+	if _, err := c.SubmitTx(challengeTx); err != nil {
+		t.Fatalf("submit challenge tx: %v", err)
+	}
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce challenge block: %v", err)
+	}
+
+	challenges := c.GetProductChallenges()
+	if len(challenges) != 1 {
+		t.Fatalf("expected 1 challenge, got %d", len(challenges))
+	}
+
+	resolveEarly := Transaction{
+		Kind:        TxKindProductResolveChallenge,
+		To:          Address(challenges[0].ID),
+		Amount:      1,
+		Fee:         1,
+		Nonce:       2,
+		Timestamp:   1_700_000_000_004,
+		BasisPoints: 500,
+	}
+	if err := SignTransaction(&resolveEarly, valPriv); err != nil {
+		t.Fatalf("sign early resolve tx: %v", err)
+	}
+	if _, err := c.SubmitTx(resolveEarly); !errors.Is(err, ErrProductChallengeTooEarly) {
+		t.Fatalf("expected ErrProductChallengeTooEarly, got %v", err)
+	}
+
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce spacer block: %v", err)
+	}
+
+	resolveTx := Transaction{
+		Kind:        TxKindProductResolveChallenge,
+		To:          Address(challenges[0].ID),
+		Amount:      1,
+		Fee:         1,
+		Nonce:       2,
+		Timestamp:   1_700_000_000_005,
+		BasisPoints: 500,
+	}
+	if err := SignTransaction(&resolveTx, valPriv); err != nil {
+		t.Fatalf("sign resolve tx: %v", err)
+	}
+	if _, err := c.SubmitTx(resolveTx); err != nil {
+		t.Fatalf("submit resolve tx: %v", err)
+	}
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce resolve block: %v", err)
+	}
+
+	challenges = c.GetProductChallenges()
+	if len(challenges) != 1 || challenges[0].Open {
+		t.Fatalf("expected challenge to be closed after delayed resolution")
+	}
+}
+
+func TestProductPendingAttestationExpiresByTTL(t *testing.T) {
+	pub1, priv1, addr1, err := DeterministicKeypair("pending-ttl-v1")
+	if err != nil {
+		t.Fatalf("validator v1 keypair: %v", err)
+	}
+	pub2, _, addr2, err := DeterministicKeypair("pending-ttl-v2")
+	if err != nil {
+		t.Fatalf("validator v2 keypair: %v", err)
+	}
+
+	c, err := New(Config{
+		BaseReward:                  0,
+		MinTxFee:                    1,
+		EpochLengthBlocks:           20,
+		ProductOracleQuorumBps:      7000,
+		ProductAttestationTTLBlocks: 1,
+		GenesisTimestampMs:          1_700_000_000_000,
+		GenesisAccounts: map[Address]uint64{
+			addr1: 1_000,
+			addr2: 1_000,
+		},
+		GenesisValidators: []GenesisValidator{
+			{ID: "v1", PubKey: pub1, Stake: 1_000, WorkWeight: 100, Active: true},
+			{ID: "v2", PubKey: pub2, Stake: 1_000, WorkWeight: 100, Active: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new chain: %v", err)
+	}
+
+	attest := Transaction{
+		Kind:        TxKindProductAttest,
+		To:          Address("proof-ttl"),
+		Amount:      5,
+		Fee:         1,
+		Nonce:       1,
+		Timestamp:   1_700_000_000_001,
+		ValidatorID: "v1",
+		BasisPoints: 8000,
+	}
+	if err := SignTransaction(&attest, priv1); err != nil {
+		t.Fatalf("sign attest tx: %v", err)
+	}
+	if _, err := c.SubmitTx(attest); err != nil {
+		t.Fatalf("submit attest tx: %v", err)
+	}
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce attest block: %v", err)
+	}
+
+	if len(c.GetProductPendingAttestations()) != 1 {
+		t.Fatalf("expected 1 pending attestation before ttl expiry")
+	}
+	if len(c.GetProductProofs()) != 0 {
+		t.Fatalf("expected no finalized proofs before ttl expiry")
+	}
+
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce ttl-expiry block: %v", err)
+	}
+	if len(c.GetProductPendingAttestations()) != 0 {
+		t.Fatalf("expected pending attestations to expire after ttl")
+	}
+	if len(c.GetProductProofs()) != 0 {
+		t.Fatalf("expected no finalized proofs after ttl expiry")
+	}
+}
+
+func TestProductChallengeTimesOutAfterMaxOpenBlocks(t *testing.T) {
+	pub, valPriv, valAddr, err := DeterministicKeypair("challenge-timeout-v1")
+	if err != nil {
+		t.Fatalf("validator keypair: %v", err)
+	}
+	_, alicePriv, aliceAddr, err := DeterministicKeypair("challenge-timeout-alice")
+	if err != nil {
+		t.Fatalf("alice keypair: %v", err)
+	}
+
+	c, err := New(Config{
+		BaseReward:                         0,
+		MinTxFee:                           1,
+		ProductChallengeMinBond:            10,
+		ProductChallengeMaxOpenBlocks:      1,
+		ProductChallengeResolveDelayBlocks: 1,
+		GenesisTimestampMs:                 1_700_000_000_000,
+		GenesisAccounts: map[Address]uint64{
+			valAddr:   1_000,
+			aliceAddr: 1_000,
+		},
+		GenesisValidators: []GenesisValidator{
+			{ID: "v1", PubKey: pub, Stake: 1_000, WorkWeight: 100, Active: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("new chain: %v", err)
+	}
+
+	settleTx := Transaction{
+		Kind:      TxKindProductSettle,
+		To:        Address("order-timeout"),
+		Amount:    100,
+		Fee:       1,
+		Nonce:     1,
+		Timestamp: 1_700_000_000_001,
+	}
+	if err := SignTransaction(&settleTx, alicePriv); err != nil {
+		t.Fatalf("sign settle tx: %v", err)
+	}
+	if _, err := c.SubmitTx(settleTx); err != nil {
+		t.Fatalf("submit settle tx: %v", err)
+	}
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce settle block: %v", err)
+	}
+
+	attestTx := Transaction{
+		Kind:        TxKindProductAttest,
+		To:          Address("proof-timeout"),
+		Amount:      10,
+		Fee:         1,
+		Nonce:       1,
+		Timestamp:   1_700_000_000_002,
+		ValidatorID: "v1",
+		BasisPoints: 9000,
+	}
+	if err := SignTransaction(&attestTx, valPriv); err != nil {
+		t.Fatalf("sign attest tx: %v", err)
+	}
+	if _, err := c.SubmitTx(attestTx); err != nil {
+		t.Fatalf("submit attest tx: %v", err)
+	}
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce attest block: %v", err)
+	}
+	proofs := c.GetProductProofs()
+	if len(proofs) != 1 {
+		t.Fatalf("expected 1 proof before challenge, got %d", len(proofs))
+	}
+
+	challengeTx := Transaction{
+		Kind:      TxKindProductChallenge,
+		To:        Address(proofs[0].ID),
+		Amount:    20,
+		Fee:       1,
+		Nonce:     2,
+		Timestamp: 1_700_000_000_003,
+	}
+	if err := SignTransaction(&challengeTx, alicePriv); err != nil {
+		t.Fatalf("sign challenge tx: %v", err)
+	}
+	if _, err := c.SubmitTx(challengeTx); err != nil {
+		t.Fatalf("submit challenge tx: %v", err)
+	}
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce challenge block: %v", err)
+	}
+
+	challenges := c.GetProductChallenges()
+	if len(challenges) != 1 || !challenges[0].Open {
+		t.Fatalf("expected open challenge before timeout")
+	}
+
+	if _, err := c.ProduceOnce(); err != nil {
+		t.Fatalf("produce timeout block: %v", err)
+	}
+	challenges = c.GetProductChallenges()
+	if len(challenges) != 1 {
+		t.Fatalf("expected 1 challenge after timeout, got %d", len(challenges))
+	}
+	if challenges[0].Open {
+		t.Fatalf("expected challenge to close on timeout")
+	}
+	if challenges[0].Successful {
+		t.Fatalf("expected timed-out challenge to be unsuccessful")
+	}
+	if challenges[0].Resolver != Address("system-timeout") {
+		t.Fatalf("expected system-timeout resolver, got %s", challenges[0].Resolver)
+	}
+
+	resolveTx := Transaction{
+		Kind:        TxKindProductResolveChallenge,
+		To:          Address(challenges[0].ID),
+		Amount:      1,
+		Fee:         1,
+		Nonce:       2,
+		Timestamp:   1_700_000_000_004,
+		BasisPoints: 500,
+	}
+	if err := SignTransaction(&resolveTx, valPriv); err != nil {
+		t.Fatalf("sign resolve tx: %v", err)
+	}
+	if _, err := c.SubmitTx(resolveTx); !errors.Is(err, ErrProductChallengeClosed) {
+		t.Fatalf("expected ErrProductChallengeClosed after timeout, got %v", err)
 	}
 }

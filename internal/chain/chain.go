@@ -14,35 +14,47 @@ import (
 )
 
 var (
-	ErrNoValidators            = errors.New("no validators configured")
-	ErrNoQuorum                = errors.New("quorum not reached")
-	ErrTxFeeTooLow             = errors.New("transaction fee below minimum")
-	ErrMempoolFull             = errors.New("mempool is full")
-	ErrMempoolAccountLimit     = errors.New("account pending transaction limit reached")
-	ErrMempoolInvariantBroken  = errors.New("mempool invariant broken")
-	ErrInvalidProposer         = errors.New("invalid proposer")
-	ErrUnexpectedHeight        = errors.New("unexpected block height")
-	ErrBlockAlreadyFinalized   = errors.New("block already finalized")
-	ErrInvalidAmount           = errors.New("invalid amount")
-	ErrInvalidSlashBasis       = errors.New("invalid slash basis points")
-	ErrValidatorStillJailed    = errors.New("validator is still jailed")
-	ErrInvalidProductProofRef  = errors.New("invalid product proof reference")
-	ErrUnknownProductProof     = errors.New("unknown product proof")
-	ErrUnknownProductChallenge = errors.New("unknown product challenge")
-	ErrProductChallengeOpen    = errors.New("product challenge is already open")
-	ErrProductChallengeClosed  = errors.New("product challenge is already resolved")
-	ErrProductChallengeBondLow = errors.New("product challenge bond below minimum")
-	ErrProductTreasuryFunds    = errors.New("insufficient product treasury funds")
-	ErrOracleUnauthorized      = errors.New("sender is not authorized as oracle")
+	ErrNoValidators                    = errors.New("no validators configured")
+	ErrNoQuorum                        = errors.New("quorum not reached")
+	ErrTxFeeTooLow                     = errors.New("transaction fee below minimum")
+	ErrMempoolFull                     = errors.New("mempool is full")
+	ErrMempoolAccountLimit             = errors.New("account pending transaction limit reached")
+	ErrMempoolInvariantBroken          = errors.New("mempool invariant broken")
+	ErrDuplicateTransaction            = errors.New("duplicate transaction")
+	ErrTransactionAlreadyFinalized     = errors.New("transaction already finalized")
+	ErrInvalidProposer                 = errors.New("invalid proposer")
+	ErrUnexpectedHeight                = errors.New("unexpected block height")
+	ErrBlockAlreadyFinalized           = errors.New("block already finalized")
+	ErrInvalidAmount                   = errors.New("invalid amount")
+	ErrInvalidSlashBasis               = errors.New("invalid slash basis points")
+	ErrValidatorStillJailed            = errors.New("validator is still jailed")
+	ErrInvalidProductProofRef          = errors.New("invalid product proof reference")
+	ErrUnknownProductProof             = errors.New("unknown product proof")
+	ErrUnknownProductChallenge         = errors.New("unknown product challenge")
+	ErrProductChallengeOpen            = errors.New("product challenge is already open")
+	ErrProductChallengeClosed          = errors.New("product challenge is already resolved")
+	ErrProductChallengeBondLow         = errors.New("product challenge bond below minimum")
+	ErrProductTreasuryFunds            = errors.New("insufficient product treasury funds")
+	ErrOracleUnauthorized              = errors.New("sender is not authorized as oracle")
+	ErrProductAttestationDuplicateVote = errors.New("oracle already voted for product attestation")
+	ErrProductProofAlreadyFinalized    = errors.New("product proof is already finalized")
+	ErrProductChallengeTooEarly        = errors.New("product challenge cannot be resolved yet")
+	ErrProductChallengeDuplicateVote   = errors.New("oracle already voted for product challenge resolution")
+	ErrProductChallengeVoteMismatch    = errors.New("challenge resolution vote parameters do not match current approval proposal")
+	ErrProductSettlementDuplicate      = errors.New("duplicate product settlement reference for payer")
 )
 
 const (
-	defaultMinJailBlocks         uint64 = 3
-	defaultMaxPendingPerAccount         = 64
-	defaultMaxMempoolTxAgeBlocks uint64 = 120
-	defaultEpochLengthBlocks     uint64 = 1
-	defaultProductRewardBps      uint64 = 2_000
-	defaultProductChallengeBond  uint64 = 10
+	defaultMinJailBlocks                      uint64 = 3
+	defaultMaxPendingPerAccount                      = 64
+	defaultMaxMempoolTxAgeBlocks              uint64 = 120
+	defaultEpochLengthBlocks                  uint64 = 1
+	defaultProductRewardBps                   uint64 = 2_000
+	defaultProductChallengeBond               uint64 = 10
+	defaultProductOracleQuorumBps             uint64 = 6_667
+	defaultProductChallengeResolveDelayBlocks uint64 = 1
+	defaultProductAttestationTTLBlocks        uint64 = 8
+	defaultProductChallengeMaxOpenBlocks      uint64 = 64
 )
 
 type GenesisValidator struct {
@@ -55,58 +67,74 @@ type GenesisValidator struct {
 }
 
 type Config struct {
-	BlockInterval           time.Duration
-	GenesisTimestampMs      int64
-	BaseReward              uint64
-	MinJailBlocks           uint64
-	EpochLengthBlocks       uint64
-	MaxTxPerBlock           int
-	MaxMempoolSize          int
-	MaxPendingTxPerAccount  int
-	MaxMempoolTxAgeBlocks   uint64
-	MinTxFee                uint64
-	ProductRewardBps        uint64
-	ProductChallengeMinBond uint64
-	GenesisAccounts         map[Address]uint64
-	GenesisValidators       []GenesisValidator
-	FinalizeHook            func(Block)
+	BlockInterval                      time.Duration
+	GenesisTimestampMs                 int64
+	BaseReward                         uint64
+	MinJailBlocks                      uint64
+	EpochLengthBlocks                  uint64
+	MaxTxPerBlock                      int
+	MaxMempoolSize                     int
+	MaxPendingTxPerAccount             int
+	MaxMempoolTxAgeBlocks              uint64
+	MinTxFee                           uint64
+	ProductRewardBps                   uint64
+	ProductChallengeMinBond            uint64
+	ProductOracleQuorumBps             uint64
+	ProductChallengeResolveDelayBlocks uint64
+	ProductAttestationTTLBlocks        uint64
+	ProductChallengeMaxOpenBlocks      uint64
+	GenesisAccounts                    map[Address]uint64
+	GenesisValidators                  []GenesisValidator
+	FinalizeHook                       func(Block)
+}
+
+type txIndexRecord struct {
+	Location FinalizedTxLocation
+	Tx       Transaction
 }
 
 type Chain struct {
-	mu                      sync.RWMutex
-	accounts                map[Address]*Account
-	validators              map[string]*Validator
-	delegations             map[string]*Delegation
-	validatorOrder          []string
-	mempool                 []Transaction
-	mempoolSet              map[string]struct{}
-	mempoolAddedHeight      map[string]uint64
-	blocks                  []Block
-	blockInterval           time.Duration
-	baseReward              uint64
-	minJailBlocks           uint64
-	epochLengthBlocks       uint64
-	currentEpoch            uint64
-	epochStartHeight        uint64
-	epochEffectiveStake     map[string]uint64
-	maxTxPerBlock           int
-	maxMempoolSize          int
-	maxPendingTxPerAccount  int
-	maxMempoolTxAgeBlocks   uint64
-	minTxFee                uint64
-	productRewardBps        uint64
-	productChallengeMinBond uint64
-	productTreasuryBalance  uint64
-	productProofs           map[string]*ProductProof
-	productChallenges       map[string]*ProductChallenge
-	productOpenChallenges   map[string]string
-	productSettlements      map[string]*ProductSettlement
-	productSignalScore      map[string]uint64
-	lastProductRewardEpoch  uint64
-	lastProductRewards      map[string]uint64
-	finalizeHook            func(Block)
-	lastFinalizedAt         time.Time
-	startedAt               time.Time
+	mu                                 sync.RWMutex
+	accounts                           map[Address]*Account
+	validators                         map[string]*Validator
+	delegations                        map[string]*Delegation
+	validatorOrder                     []string
+	mempool                            []Transaction
+	mempoolSet                         map[string]struct{}
+	mempoolAddedHeight                 map[string]uint64
+	blocks                             []Block
+	txIndex                            map[string]txIndexRecord
+	blockInterval                      time.Duration
+	baseReward                         uint64
+	minJailBlocks                      uint64
+	epochLengthBlocks                  uint64
+	currentEpoch                       uint64
+	epochStartHeight                   uint64
+	epochEffectiveStake                map[string]uint64
+	maxTxPerBlock                      int
+	maxMempoolSize                     int
+	maxPendingTxPerAccount             int
+	maxMempoolTxAgeBlocks              uint64
+	minTxFee                           uint64
+	productRewardBps                   uint64
+	productChallengeMinBond            uint64
+	productOracleQuorumBps             uint64
+	productChallengeResolveDelayBlocks uint64
+	productAttestationTTLBlocks        uint64
+	productChallengeMaxOpenBlocks      uint64
+	productTreasuryBalance             uint64
+	productProofs                      map[string]*ProductProof
+	productPendingAttestations         map[string]*ProductPendingAttestation
+	productChallenges                  map[string]*ProductChallenge
+	productOpenChallenges              map[string]string
+	productSettlements                 map[string]*ProductSettlement
+	productSettlementRefs              map[string]string
+	productSignalScore                 map[string]uint64
+	lastProductRewardEpoch             uint64
+	lastProductRewards                 map[string]uint64
+	finalizeHook                       func(Block)
+	lastFinalizedAt                    time.Time
+	startedAt                          time.Time
 
 	submittedTxTotal     uint64
 	rejectedTxTotal      uint64
@@ -152,6 +180,24 @@ func New(cfg Config) (*Chain, error) {
 	}
 	if cfg.ProductChallengeMinBond == 0 {
 		cfg.ProductChallengeMinBond = defaultProductChallengeBond
+	}
+	if cfg.ProductOracleQuorumBps > 10_000 {
+		cfg.ProductOracleQuorumBps = 10_000
+	}
+	if cfg.ProductOracleQuorumBps == 0 {
+		cfg.ProductOracleQuorumBps = defaultProductOracleQuorumBps
+	}
+	if cfg.ProductOracleQuorumBps <= 5_000 {
+		cfg.ProductOracleQuorumBps = 5_001
+	}
+	if cfg.ProductChallengeResolveDelayBlocks == 0 {
+		cfg.ProductChallengeResolveDelayBlocks = defaultProductChallengeResolveDelayBlocks
+	}
+	if cfg.ProductAttestationTTLBlocks == 0 {
+		cfg.ProductAttestationTTLBlocks = defaultProductAttestationTTLBlocks
+	}
+	if cfg.ProductChallengeMaxOpenBlocks == 0 {
+		cfg.ProductChallengeMaxOpenBlocks = defaultProductChallengeMaxOpenBlocks
 	}
 	if len(cfg.GenesisValidators) == 0 {
 		return nil, ErrNoValidators
@@ -212,38 +258,45 @@ func New(cfg Config) (*Chain, error) {
 	sort.Strings(order)
 
 	c := &Chain{
-		accounts:                accounts,
-		validators:              validators,
-		delegations:             make(map[string]*Delegation),
-		validatorOrder:          order,
-		mempool:                 make([]Transaction, 0),
-		mempoolSet:              make(map[string]struct{}),
-		mempoolAddedHeight:      make(map[string]uint64),
-		blocks:                  make([]Block, 0, 1024),
-		blockInterval:           cfg.BlockInterval,
-		baseReward:              cfg.BaseReward,
-		minJailBlocks:           cfg.MinJailBlocks,
-		epochLengthBlocks:       cfg.EpochLengthBlocks,
-		currentEpoch:            0,
-		epochStartHeight:        1,
-		epochEffectiveStake:     make(map[string]uint64, len(order)),
-		maxTxPerBlock:           cfg.MaxTxPerBlock,
-		maxMempoolSize:          cfg.MaxMempoolSize,
-		maxPendingTxPerAccount:  cfg.MaxPendingTxPerAccount,
-		maxMempoolTxAgeBlocks:   cfg.MaxMempoolTxAgeBlocks,
-		minTxFee:                cfg.MinTxFee,
-		productRewardBps:        cfg.ProductRewardBps,
-		productChallengeMinBond: cfg.ProductChallengeMinBond,
-		productTreasuryBalance:  0,
-		productProofs:           make(map[string]*ProductProof),
-		productChallenges:       make(map[string]*ProductChallenge),
-		productOpenChallenges:   make(map[string]string),
-		productSettlements:      make(map[string]*ProductSettlement),
-		productSignalScore:      make(map[string]uint64),
-		lastProductRewards:      make(map[string]uint64),
-		finalizeHook:            cfg.FinalizeHook,
-		lastFinalizedAt:         time.Now(),
-		startedAt:               time.Now(),
+		accounts:                           accounts,
+		validators:                         validators,
+		delegations:                        make(map[string]*Delegation),
+		validatorOrder:                     order,
+		mempool:                            make([]Transaction, 0),
+		mempoolSet:                         make(map[string]struct{}),
+		mempoolAddedHeight:                 make(map[string]uint64),
+		blocks:                             make([]Block, 0, 1024),
+		txIndex:                            make(map[string]txIndexRecord),
+		blockInterval:                      cfg.BlockInterval,
+		baseReward:                         cfg.BaseReward,
+		minJailBlocks:                      cfg.MinJailBlocks,
+		epochLengthBlocks:                  cfg.EpochLengthBlocks,
+		currentEpoch:                       0,
+		epochStartHeight:                   1,
+		epochEffectiveStake:                make(map[string]uint64, len(order)),
+		maxTxPerBlock:                      cfg.MaxTxPerBlock,
+		maxMempoolSize:                     cfg.MaxMempoolSize,
+		maxPendingTxPerAccount:             cfg.MaxPendingTxPerAccount,
+		maxMempoolTxAgeBlocks:              cfg.MaxMempoolTxAgeBlocks,
+		minTxFee:                           cfg.MinTxFee,
+		productRewardBps:                   cfg.ProductRewardBps,
+		productChallengeMinBond:            cfg.ProductChallengeMinBond,
+		productOracleQuorumBps:             cfg.ProductOracleQuorumBps,
+		productChallengeResolveDelayBlocks: cfg.ProductChallengeResolveDelayBlocks,
+		productAttestationTTLBlocks:        cfg.ProductAttestationTTLBlocks,
+		productChallengeMaxOpenBlocks:      cfg.ProductChallengeMaxOpenBlocks,
+		productTreasuryBalance:             0,
+		productProofs:                      make(map[string]*ProductProof),
+		productPendingAttestations:         make(map[string]*ProductPendingAttestation),
+		productChallenges:                  make(map[string]*ProductChallenge),
+		productOpenChallenges:              make(map[string]string),
+		productSettlements:                 make(map[string]*ProductSettlement),
+		productSettlementRefs:              make(map[string]string),
+		productSignalScore:                 make(map[string]uint64),
+		lastProductRewards:                 make(map[string]uint64),
+		finalizeHook:                       cfg.FinalizeHook,
+		lastFinalizedAt:                    time.Now(),
+		startedAt:                          time.Now(),
 	}
 	c.epochEffectiveStake = c.buildEpochStakeSnapshotForState(c.validators, c.delegations)
 
@@ -263,6 +316,7 @@ func New(cfg Config) (*Chain, error) {
 	}
 	genesis.Hash = c.hashBlock(genesis)
 	c.blocks = append(c.blocks, genesis)
+	c.rebuildTxIndexLocked()
 
 	return c, nil
 }
@@ -326,6 +380,8 @@ func (c *Chain) ProduceOnce() (Block, error) {
 	workingDelegations := c.cloneDelegations(c.delegations)
 	workingProduct := c.cloneProductExecutionStateLocked()
 	workingEpoch := c.currentEpoch
+	blockTimestamp := c.nextBlockTimestampLocked()
+	expireProductStateAtHeight(workingProduct, height, blockTimestamp)
 	candidates := c.sortedMempoolCandidatesLocked(height)
 	included := make([]Transaction, 0, min(c.maxTxPerBlock, len(candidates)))
 	includedIDs := make(map[string]struct{}, len(candidates))
@@ -352,7 +408,7 @@ func (c *Chain) ProduceOnce() (Block, error) {
 				dropIDs[txID] = struct{}{}
 				continue
 			}
-			if err := applyTx(workingState, workingValidators, workingDelegations, workingProduct, tx, height, c.minJailBlocks, workingEpoch, c.productChallengeMinBond); err != nil {
+			if err := applyTx(workingState, workingValidators, workingDelegations, workingProduct, tx, height, c.minJailBlocks, workingEpoch, c.productChallengeMinBond, c.productOracleQuorumBps, c.productChallengeResolveDelayBlocks, c.productAttestationTTLBlocks, c.productChallengeMaxOpenBlocks); err != nil {
 				// Keep tx for future blocks if it becomes valid after prior nonces arrive.
 				nextRemaining = append(nextRemaining, tx)
 				continue
@@ -384,7 +440,7 @@ func (c *Chain) ProduceOnce() (Block, error) {
 		Height:       height,
 		Round:        0,
 		PrevHash:     prevHash,
-		Timestamp:    c.nextBlockTimestampLocked(),
+		Timestamp:    blockTimestamp,
 		Proposer:     proposerID,
 		Transactions: included,
 		StateRoot:    c.computeStateRoot(workingState, workingValidators, workingDelegations, workingProduct, workingEpoch),
@@ -403,9 +459,11 @@ func (c *Chain) ProduceOnce() (Block, error) {
 	c.delegations = workingDelegations
 	c.productTreasuryBalance = workingProduct.TreasuryBalance
 	c.productProofs = workingProduct.Proofs
+	c.productPendingAttestations = workingProduct.PendingAttestations
 	c.productChallenges = workingProduct.Challenges
 	c.productOpenChallenges = workingProduct.OpenChallenges
 	c.productSettlements = workingProduct.Settlements
+	c.productSettlementRefs = workingProduct.SettlementRefs
 	c.productSignalScore = workingProduct.SignalScore
 	c.lastProductRewardEpoch = workingProduct.LastRewardEpoch
 	c.lastProductRewards = workingProduct.LastRewards
@@ -418,6 +476,7 @@ func (c *Chain) ProduceOnce() (Block, error) {
 		c.epochEffectiveStake = c.buildEpochStakeSnapshotForState(workingValidators, workingDelegations)
 	}
 	c.blocks = append(c.blocks, block)
+	c.indexFinalizedBlockTxsLocked(block)
 	c.lastFinalizedAt = time.Now()
 	c.finalizedBlocksTotal++
 	c.includedTxTotal += uint64(len(included))
@@ -445,7 +504,11 @@ func (c *Chain) SubmitTx(tx Transaction) (string, error) {
 	txID := tx.ID()
 	if _, exists := c.mempoolSet[txID]; exists {
 		c.rejectedTxTotal++
-		return "", fmt.Errorf("duplicate transaction %s", txID)
+		return "", fmt.Errorf("%w: %s", ErrDuplicateTransaction, txID)
+	}
+	if _, exists := c.txIndex[txID]; exists {
+		c.rejectedTxTotal++
+		return "", fmt.Errorf("%w: %s", ErrTransactionAlreadyFinalized, txID)
 	}
 	if c.maxPendingTxPerAccount > 0 {
 		pendingForAccount := c.pendingCountForAccountLocked(tx.From)
@@ -474,12 +537,12 @@ func (c *Chain) SubmitTx(tx Transaction) (string, error) {
 	pendingProduct := c.cloneProductExecutionStateLocked()
 	nextHeight := uint64(len(c.blocks))
 	for _, pending := range c.mempool {
-		if err := applyTx(pendingState, pendingValidators, pendingDelegations, pendingProduct, pending, nextHeight, c.minJailBlocks, c.currentEpoch, c.productChallengeMinBond); err != nil {
+		if err := applyTx(pendingState, pendingValidators, pendingDelegations, pendingProduct, pending, nextHeight, c.minJailBlocks, c.currentEpoch, c.productChallengeMinBond, c.productOracleQuorumBps, c.productChallengeResolveDelayBlocks, c.productAttestationTTLBlocks, c.productChallengeMaxOpenBlocks); err != nil {
 			c.rejectedTxTotal++
 			return "", fmt.Errorf("%w: %v", ErrMempoolInvariantBroken, err)
 		}
 	}
-	if err := applyTx(pendingState, pendingValidators, pendingDelegations, pendingProduct, tx, nextHeight, c.minJailBlocks, c.currentEpoch, c.productChallengeMinBond); err != nil {
+	if err := applyTx(pendingState, pendingValidators, pendingDelegations, pendingProduct, tx, nextHeight, c.minJailBlocks, c.currentEpoch, c.productChallengeMinBond, c.productOracleQuorumBps, c.productChallengeResolveDelayBlocks, c.productAttestationTTLBlocks, c.productChallengeMaxOpenBlocks); err != nil {
 		c.rejectedTxTotal++
 		return "", err
 	}
@@ -505,7 +568,7 @@ func (c *Chain) NextNonce(address Address) (uint64, error) {
 	pendingProduct := c.cloneProductExecutionStateLocked()
 	nextHeight := uint64(len(c.blocks))
 	for _, pending := range c.mempool {
-		if err := applyTx(pendingState, pendingValidators, pendingDelegations, pendingProduct, pending, nextHeight, c.minJailBlocks, c.currentEpoch, c.productChallengeMinBond); err != nil {
+		if err := applyTx(pendingState, pendingValidators, pendingDelegations, pendingProduct, pending, nextHeight, c.minJailBlocks, c.currentEpoch, c.productChallengeMinBond, c.productOracleQuorumBps, c.productChallengeResolveDelayBlocks, c.productAttestationTTLBlocks, c.productChallengeMaxOpenBlocks); err != nil {
 			return 0, fmt.Errorf("mempool invariant broken: %w", err)
 		}
 	}
@@ -654,6 +717,8 @@ func (c *Chain) BuildProposalForRound(round uint64, proposerID string) (Block, e
 	workingDelegations := c.cloneDelegations(c.delegations)
 	workingProduct := c.cloneProductExecutionStateLocked()
 	workingEpoch := c.currentEpoch
+	blockTimestamp := c.nextBlockTimestampLocked()
+	expireProductStateAtHeight(workingProduct, height, blockTimestamp)
 	candidates := c.sortedMempoolCandidatesLocked(height)
 	included := make([]Transaction, 0, min(c.maxTxPerBlock, len(candidates)))
 	includedIDs := make(map[string]struct{}, len(candidates))
@@ -680,7 +745,7 @@ func (c *Chain) BuildProposalForRound(round uint64, proposerID string) (Block, e
 				dropIDs[txID] = struct{}{}
 				continue
 			}
-			if err := applyTx(workingState, workingValidators, workingDelegations, workingProduct, tx, height, c.minJailBlocks, workingEpoch, c.productChallengeMinBond); err != nil {
+			if err := applyTx(workingState, workingValidators, workingDelegations, workingProduct, tx, height, c.minJailBlocks, workingEpoch, c.productChallengeMinBond, c.productOracleQuorumBps, c.productChallengeResolveDelayBlocks, c.productAttestationTTLBlocks, c.productChallengeMaxOpenBlocks); err != nil {
 				nextRemaining = append(nextRemaining, tx)
 				continue
 			}
@@ -711,7 +776,7 @@ func (c *Chain) BuildProposalForRound(round uint64, proposerID string) (Block, e
 		Height:       height,
 		Round:        round,
 		PrevHash:     prevHash,
-		Timestamp:    c.nextBlockTimestampLocked(),
+		Timestamp:    blockTimestamp,
 		Proposer:     proposerID,
 		Transactions: included,
 		StateRoot:    c.computeStateRoot(workingState, workingValidators, workingDelegations, workingProduct, workingEpoch),
@@ -816,9 +881,11 @@ func (c *Chain) FinalizeExternalBlock(block Block) error {
 	c.delegations = workingDelegations
 	c.productTreasuryBalance = workingProduct.TreasuryBalance
 	c.productProofs = workingProduct.Proofs
+	c.productPendingAttestations = workingProduct.PendingAttestations
 	c.productChallenges = workingProduct.Challenges
 	c.productOpenChallenges = workingProduct.OpenChallenges
 	c.productSettlements = workingProduct.Settlements
+	c.productSettlementRefs = workingProduct.SettlementRefs
 	c.productSignalScore = workingProduct.SignalScore
 	c.lastProductRewardEpoch = workingProduct.LastRewardEpoch
 	c.lastProductRewards = workingProduct.LastRewards
@@ -831,6 +898,7 @@ func (c *Chain) FinalizeExternalBlock(block Block) error {
 		c.epochEffectiveStake = c.buildEpochStakeSnapshotForState(workingValidators, workingDelegations)
 	}
 	c.blocks = append(c.blocks, block)
+	c.indexFinalizedBlockTxsLocked(block)
 	c.lastFinalizedAt = time.Now()
 	c.finalizedBlocksTotal++
 	c.includedTxTotal += uint64(len(block.Transactions))
@@ -927,17 +995,46 @@ func (c *Chain) GetProductStatus() ProductStatus {
 		}
 	}
 	return ProductStatus{
-		TreasuryBalance:    c.productTreasuryBalance,
-		RewardBasisPoints:  c.productRewardBps,
-		ChallengeMinBond:   c.productChallengeMinBond,
-		CurrentEpoch:       c.currentEpoch,
-		LastRewardEpoch:    c.lastProductRewardEpoch,
-		LastRewards:        lastRewards,
-		PendingSignalScore: pendingScore,
-		ProofCount:         len(c.productProofs),
-		OpenChallenges:     openChallenges,
-		SettlementCount:    len(c.productSettlements),
+		TreasuryBalance:             c.productTreasuryBalance,
+		RewardBasisPoints:           c.productRewardBps,
+		ChallengeMinBond:            c.productChallengeMinBond,
+		OracleQuorumBps:             c.productOracleQuorumBps,
+		ChallengeResolveDelayBlocks: c.productChallengeResolveDelayBlocks,
+		AttestationTTLBlocks:        c.productAttestationTTLBlocks,
+		ChallengeMaxOpenBlocks:      c.productChallengeMaxOpenBlocks,
+		CurrentEpoch:                c.currentEpoch,
+		LastRewardEpoch:             c.lastProductRewardEpoch,
+		LastRewards:                 lastRewards,
+		PendingSignalScore:          pendingScore,
+		PendingAttestations:         len(c.productPendingAttestations),
+		ProofCount:                  len(c.productProofs),
+		OpenChallenges:              openChallenges,
+		SettlementCount:             len(c.productSettlements),
 	}
+}
+
+func (c *Chain) GetProductPendingAttestations() []ProductPendingAttestation {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	keys := make([]string, 0, len(c.productPendingAttestations))
+	for id := range c.productPendingAttestations {
+		keys = append(keys, id)
+	}
+	sort.Strings(keys)
+	out := make([]ProductPendingAttestation, 0, len(keys))
+	for _, id := range keys {
+		pending := c.productPendingAttestations[id]
+		if pending == nil {
+			continue
+		}
+		copied := *pending
+		if len(pending.Votes) > 0 {
+			copied.Votes = append([]ProductAttestationVote(nil), pending.Votes...)
+		}
+		out = append(out, copied)
+	}
+	return out
 }
 
 func (c *Chain) GetProductProofs() []ProductProof {
@@ -975,7 +1072,11 @@ func (c *Chain) GetProductChallenges() []ProductChallenge {
 		if challenge == nil {
 			continue
 		}
-		out = append(out, *challenge)
+		copied := *challenge
+		if len(challenge.Votes) > 0 {
+			copied.Votes = append([]ProductChallengeVote(nil), challenge.Votes...)
+		}
+		out = append(out, copied)
 	}
 	return out
 }
@@ -998,6 +1099,22 @@ func (c *Chain) GetProductSettlements() []ProductSettlement {
 		out = append(out, *settlement)
 	}
 	return out
+}
+
+func (c *Chain) GetProductSettlementByPayerReference(payer Address, reference string) (ProductSettlement, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	refKey := settlementReferenceKey(payer, reference)
+	settlementID, ok := c.productSettlementRefs[refKey]
+	if !ok || settlementID == "" {
+		return ProductSettlement{}, false
+	}
+	settlement := c.productSettlements[settlementID]
+	if settlement == nil {
+		return ProductSettlement{}, false
+	}
+	return *settlement, true
 }
 
 func (c *Chain) SetValidatorWorkWeight(id string, workWeight uint64) error {
@@ -1164,6 +1281,127 @@ func (c *Chain) GetBlocks(from, limit int) []Block {
 	return result
 }
 
+func (c *Chain) GetTransaction(txID string) (TransactionLookup, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	target := strings.TrimSpace(txID)
+	if target == "" {
+		return TransactionLookup{}, false
+	}
+
+	for idx, tx := range c.mempool {
+		if tx.ID() != target {
+			continue
+		}
+		copied := tx
+		mempoolIndex := idx
+		return TransactionLookup{
+			TxID:         target,
+			State:        TxStatePending,
+			Transaction:  copied,
+			MempoolIndex: &mempoolIndex,
+		}, true
+	}
+
+	record, ok := c.txIndex[target]
+	if ok {
+		copiedTx := record.Tx
+		location := record.Location
+		return TransactionLookup{
+			TxID:        target,
+			State:       TxStateFinalized,
+			Transaction: copiedTx,
+			Finalized:   &location,
+		}, true
+	}
+
+	return TransactionLookup{}, false
+}
+
+func (c *Chain) GetFinalizedTransactions() []TransactionLookup {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	out := make([]TransactionLookup, 0, len(c.txIndex))
+	for txID, record := range c.txIndex {
+		copiedTx := record.Tx
+		location := record.Location
+		out = append(out, TransactionLookup{
+			TxID:        txID,
+			State:       TxStateFinalized,
+			Transaction: copiedTx,
+			Finalized:   &location,
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		left := out[i]
+		right := out[j]
+		if left.Finalized != nil && right.Finalized != nil {
+			if left.Finalized.Height != right.Finalized.Height {
+				return left.Finalized.Height < right.Finalized.Height
+			}
+			if left.Finalized.Round != right.Finalized.Round {
+				return left.Finalized.Round < right.Finalized.Round
+			}
+			if left.Finalized.TxIndex != right.Finalized.TxIndex {
+				return left.Finalized.TxIndex < right.Finalized.TxIndex
+			}
+		}
+		return left.TxID < right.TxID
+	})
+	return out
+}
+
+func (c *Chain) GetPendingTransactions() []PendingTransaction {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	out := make([]PendingTransaction, 0, len(c.mempool))
+	for _, tx := range c.mempool {
+		txID := tx.ID()
+		copied := tx
+		out = append(out, PendingTransaction{
+			TxID:        txID,
+			AddedHeight: c.mempoolAddedHeight[txID],
+			Transaction: copied,
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].AddedHeight != out[j].AddedHeight {
+			return out[i].AddedHeight < out[j].AddedHeight
+		}
+		if out[i].Transaction.Timestamp != out[j].Transaction.Timestamp {
+			return out[i].Transaction.Timestamp < out[j].Transaction.Timestamp
+		}
+		return out[i].TxID < out[j].TxID
+	})
+	return out
+}
+
+func (c *Chain) rebuildTxIndexLocked() {
+	c.txIndex = make(map[string]txIndexRecord)
+	for _, block := range c.blocks {
+		c.indexFinalizedBlockTxsLocked(block)
+	}
+}
+
+func (c *Chain) indexFinalizedBlockTxsLocked(block Block) {
+	for idx, tx := range block.Transactions {
+		txID := tx.ID()
+		c.txIndex[txID] = txIndexRecord{
+			Location: FinalizedTxLocation{
+				Height:    block.Height,
+				Round:     block.Round,
+				BlockHash: block.Hash,
+				Timestamp: block.Timestamp,
+				TxIndex:   idx,
+			},
+			Tx: tx,
+		}
+	}
+}
+
 func (c *Chain) SetFinalizeHook(hook func(Block)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1285,6 +1523,9 @@ func (c *Chain) validateTxBasic(tx Transaction) error {
 		if tx.BasisPoints > 10_000 {
 			return ErrInvalidSlashBasis
 		}
+		if tx.BasisPoints == 0 && tx.Amount != 0 {
+			return errors.New("amount must be 0 when basisPoints is 0 for product resolve tx")
+		}
 		if tx.ValidatorID != "" {
 			return errors.New("validatorId is not supported for product resolve tx")
 		}
@@ -1307,9 +1548,16 @@ func applyTx(
 	minJailBlocks uint64,
 	currentEpoch uint64,
 	productChallengeMinBond uint64,
+	productOracleQuorumBps uint64,
+	productChallengeResolveDelayBlocks uint64,
+	productAttestationTTLBlocks uint64,
+	productChallengeMaxOpenBlocks uint64,
 ) error {
 	if product == nil {
 		return errors.New("product execution state is required")
+	}
+	if product.SettlementRefs == nil {
+		product.SettlementRefs = make(map[string]string)
 	}
 	from, ok := state[tx.From]
 	if !ok {
@@ -1318,6 +1566,7 @@ func applyTx(
 	if from.Nonce+1 != tx.Nonce {
 		return fmt.Errorf("bad nonce for %s: expected %d got %d", tx.From, from.Nonce+1, tx.Nonce)
 	}
+	expireProductStateAtHeight(product, evalHeight, tx.Timestamp)
 	kind := tx.txKind()
 
 	switch kind {
@@ -1509,6 +1758,10 @@ func applyTx(
 		if from.Balance < cost {
 			return fmt.Errorf("insufficient balance for %s", tx.From)
 		}
+		settlementRefKey := settlementReferenceKey(tx.From, string(tx.To))
+		if existingSettlementID, exists := product.SettlementRefs[settlementRefKey]; exists && existingSettlementID != "" {
+			return fmt.Errorf("%w: payer=%s reference=%s settlementId=%s", ErrProductSettlementDuplicate, tx.From, tx.To, existingSettlementID)
+		}
 		nextTreasury := product.TreasuryBalance + tx.Amount
 		if nextTreasury < product.TreasuryBalance {
 			return errors.New("product treasury overflow")
@@ -1526,9 +1779,11 @@ func applyTx(
 			Epoch:       currentEpoch,
 			Timestamp:   tx.Timestamp,
 		}
+		product.SettlementRefs[settlementRefKey] = settlementID
 		return nil
 	case TxKindProductAttest:
-		if _, authorized := validatorIDByAddress(validators, tx.From); !authorized {
+		oracleValidatorID, oracleStake, authorized := oracleEffectiveStakeByAddress(validators, delegations, tx.From)
+		if !authorized || oracleStake == 0 {
 			return ErrOracleUnauthorized
 		}
 		validator, ok := validators[tx.ValidatorID]
@@ -1548,18 +1803,75 @@ func applyTx(
 		if score == 0 {
 			score = 1
 		}
-		proofID := tx.ID()
-		product.Proofs[proofID] = &ProductProof{
-			ID:          proofID,
-			ProofRef:    string(tx.To),
-			Reporter:    tx.From,
-			ValidatorID: tx.ValidatorID,
-			Units:       tx.Amount,
-			QualityBps:  tx.BasisPoints,
-			Score:       score,
-			Epoch:       currentEpoch,
-			Timestamp:   tx.Timestamp,
+		proofID := productProofID(string(tx.To), tx.ValidatorID, tx.Amount, tx.BasisPoints, currentEpoch)
+		if _, exists := product.Proofs[proofID]; exists {
+			return fmt.Errorf("%w: %s", ErrProductProofAlreadyFinalized, proofID)
 		}
+		pending := product.PendingAttestations[proofID]
+		if pending == nil {
+			requiredStake, _ := oracleQuorumStake(validators, delegations, productOracleQuorumBps)
+			if requiredStake == 0 {
+				return ErrOracleUnauthorized
+			}
+			pending = &ProductPendingAttestation{
+				ID:             proofID,
+				ProofRef:       string(tx.To),
+				ValidatorID:    tx.ValidatorID,
+				Units:          tx.Amount,
+				QualityBps:     tx.BasisPoints,
+				Score:          score,
+				Epoch:          currentEpoch,
+				RequiredStake:  requiredStake,
+				CollectedStake: 0,
+				CreatedHeight:  evalHeight,
+				ExpiresHeight:  addClampUint64(evalHeight, productAttestationTTLBlocks),
+				CreatedMs:      tx.Timestamp,
+				LastUpdatedMs:  tx.Timestamp,
+			}
+		}
+		if pending.ProofRef != string(tx.To) ||
+			pending.ValidatorID != tx.ValidatorID ||
+			pending.Units != tx.Amount ||
+			pending.QualityBps != tx.BasisPoints ||
+			pending.Epoch != currentEpoch {
+			return fmt.Errorf("%w: pending attestation mismatch for proof %s", ErrInvalidProductProofRef, proofID)
+		}
+		for _, vote := range pending.Votes {
+			if vote.Oracle == tx.From {
+				return fmt.Errorf("%w: proof=%s oracle=%s", ErrProductAttestationDuplicateVote, proofID, tx.From)
+			}
+		}
+
+		pending.Votes = append(pending.Votes, ProductAttestationVote{
+			Oracle:            tx.From,
+			OracleValidatorID: oracleValidatorID,
+			Stake:             oracleStake,
+			Timestamp:         tx.Timestamp,
+		})
+		pending.CollectedStake = addClampUint64(pending.CollectedStake, oracleStake)
+		pending.LastUpdatedMs = tx.Timestamp
+		product.PendingAttestations[proofID] = pending
+
+		from.Balance -= tx.Fee
+		from.Nonce++
+
+		if pending.CollectedStake < pending.RequiredStake {
+			return nil
+		}
+		product.Proofs[proofID] = &ProductProof{
+			ID:            proofID,
+			ProofRef:      pending.ProofRef,
+			Reporter:      tx.From,
+			ValidatorID:   tx.ValidatorID,
+			Units:         tx.Amount,
+			QualityBps:    tx.BasisPoints,
+			Score:         score,
+			Epoch:         currentEpoch,
+			Timestamp:     tx.Timestamp,
+			Attestations:  uint64(len(pending.Votes)),
+			AttestedStake: pending.CollectedStake,
+		}
+		delete(product.PendingAttestations, proofID)
 		product.SignalScore[tx.ValidatorID] = addClampUint64(product.SignalScore[tx.ValidatorID], score)
 
 		targetWeight := uint64(50 + (tx.BasisPoints*150)/10_000)
@@ -1574,9 +1886,6 @@ func applyTx(
 		if validator.WorkWeight == 0 {
 			validator.WorkWeight = 1
 		}
-
-		from.Balance -= tx.Fee
-		from.Nonce++
 		return nil
 	case TxKindProductChallenge:
 		if tx.To == "" {
@@ -1599,17 +1908,25 @@ func applyTx(
 		if existingChallengeID, exists := product.OpenChallenges[proofID]; exists && existingChallengeID != "" {
 			return fmt.Errorf("%w: proof %s already has open challenge %s", ErrProductChallengeOpen, proofID, existingChallengeID)
 		}
+		requiredStake, _ := oracleQuorumStake(validators, delegations, productOracleQuorumBps)
+		if requiredStake == 0 {
+			return ErrOracleUnauthorized
+		}
 		challengeID := tx.ID()
 		proof.Challenged = true
 		proof.ChallengeID = challengeID
 		product.Proofs[proofID] = proof
 		product.Challenges[challengeID] = &ProductChallenge{
-			ID:         challengeID,
-			ProofID:    proofID,
-			Challenger: tx.From,
-			Bond:       tx.Amount,
-			Open:       true,
-			CreatedMs:  tx.Timestamp,
+			ID:                 challengeID,
+			ProofID:            proofID,
+			Challenger:         tx.From,
+			Bond:               tx.Amount,
+			CreatedHeight:      evalHeight,
+			ResolveAfterHeight: addClampUint64(evalHeight, productChallengeResolveDelayBlocks),
+			MaxOpenHeight:      addClampUint64(evalHeight, productChallengeMaxOpenBlocks),
+			RequiredStake:      requiredStake,
+			Open:               true,
+			CreatedMs:          tx.Timestamp,
 		}
 		product.OpenChallenges[proofID] = challengeID
 		nextTreasury := product.TreasuryBalance + tx.Amount
@@ -1621,8 +1938,8 @@ func applyTx(
 		from.Nonce++
 		return nil
 	case TxKindProductResolveChallenge:
-		_, authorized := validatorIDByAddress(validators, tx.From)
-		if !authorized {
+		oracleValidatorID, oracleStake, authorized := oracleEffectiveStakeByAddress(validators, delegations, tx.From)
+		if !authorized || oracleStake == 0 {
 			return ErrOracleUnauthorized
 		}
 		if tx.To == "" {
@@ -1636,6 +1953,9 @@ func applyTx(
 		if !challenge.Open {
 			return fmt.Errorf("%w: %s", ErrProductChallengeClosed, challengeID)
 		}
+		if challenge.ResolveAfterHeight > 0 && evalHeight < challenge.ResolveAfterHeight {
+			return fmt.Errorf("%w: challenge=%s resolveAfterHeight=%d currentHeight=%d", ErrProductChallengeTooEarly, challengeID, challenge.ResolveAfterHeight, evalHeight)
+		}
 		if from.Balance < tx.Fee {
 			return fmt.Errorf("insufficient balance for %s fee payment", tx.From)
 		}
@@ -1643,18 +1963,58 @@ func applyTx(
 		if !ok {
 			return fmt.Errorf("%w: %s", ErrUnknownProductProof, challenge.ProofID)
 		}
+		updatedChallenge := *challenge
+		if len(challenge.Votes) > 0 {
+			updatedChallenge.Votes = append([]ProductChallengeVote(nil), challenge.Votes...)
+		}
+		for _, vote := range updatedChallenge.Votes {
+			if vote.Oracle == tx.From {
+				return fmt.Errorf("%w: challenge=%s oracle=%s", ErrProductChallengeDuplicateVote, challengeID, tx.From)
+			}
+		}
+		if updatedChallenge.RequiredStake == 0 {
+			requiredStake, _ := oracleQuorumStake(validators, delegations, productOracleQuorumBps)
+			if requiredStake == 0 {
+				return ErrOracleUnauthorized
+			}
+			updatedChallenge.RequiredStake = requiredStake
+		}
 
-		challenge.Open = false
-		challenge.Resolver = tx.From
-		challenge.ResolvedMs = tx.Timestamp
-		challenge.SlashBasisPoints = tx.BasisPoints
+		approve := tx.BasisPoints > 0
+		if approve {
+			if updatedChallenge.SlashBasisPoints == 0 {
+				updatedChallenge.SlashBasisPoints = tx.BasisPoints
+				updatedChallenge.BonusPayout = tx.Amount
+			} else if updatedChallenge.SlashBasisPoints != tx.BasisPoints || updatedChallenge.BonusPayout != tx.Amount {
+				return fmt.Errorf("%w: expected slashBasisPoints=%d bonus=%d got slashBasisPoints=%d bonus=%d", ErrProductChallengeVoteMismatch, updatedChallenge.SlashBasisPoints, updatedChallenge.BonusPayout, tx.BasisPoints, tx.Amount)
+			}
+			updatedChallenge.AcceptedStake = addClampUint64(updatedChallenge.AcceptedStake, oracleStake)
+		} else {
+			updatedChallenge.RejectedStake = addClampUint64(updatedChallenge.RejectedStake, oracleStake)
+		}
+		updatedChallenge.Votes = append(updatedChallenge.Votes, ProductChallengeVote{
+			Oracle:            tx.From,
+			OracleValidatorID: oracleValidatorID,
+			Approve:           approve,
+			Stake:             oracleStake,
+			Timestamp:         tx.Timestamp,
+			SlashBasisPoints:  tx.BasisPoints,
+			BonusPayout:       tx.Amount,
+		})
 
-		if tx.BasisPoints > 0 {
+		finalizeAccept := updatedChallenge.AcceptedStake >= updatedChallenge.RequiredStake
+		finalizeReject := updatedChallenge.RejectedStake >= updatedChallenge.RequiredStake
+		if finalizeAccept {
 			validator, ok := validators[proof.ValidatorID]
 			if !ok {
 				return fmt.Errorf("validator %q not found", proof.ValidatorID)
 			}
-			slashed := (validator.Stake * tx.BasisPoints) / 10_000
+			bonus := updatedChallenge.BonusPayout
+			payout := addClampUint64(updatedChallenge.Bond, bonus)
+			if product.TreasuryBalance < payout {
+				return fmt.Errorf("%w: treasury=%d payout=%d", ErrProductTreasuryFunds, product.TreasuryBalance, payout)
+			}
+			slashed := (validator.Stake * updatedChallenge.SlashBasisPoints) / 10_000
 			if slashed == 0 && validator.Stake > 0 {
 				slashed = 1
 			}
@@ -1667,10 +2027,9 @@ func applyTx(
 			if releaseHeight > validator.JailedUntilHeight {
 				validator.JailedUntilHeight = releaseHeight
 			}
-
 			if !proof.Invalidated {
 				proof.Invalidated = true
-				product.Proofs[challenge.ProofID] = proof
+				product.Proofs[updatedChallenge.ProofID] = proof
 				if proof.Epoch == currentEpoch {
 					currentScore := product.SignalScore[proof.ValidatorID]
 					if currentScore <= proof.Score {
@@ -1680,29 +2039,34 @@ func applyTx(
 					}
 				}
 			}
-			challenge.Successful = true
-			bonus := tx.Amount
-			payout := addClampUint64(challenge.Bond, bonus)
-			if product.TreasuryBalance < payout {
-				return fmt.Errorf("%w: treasury=%d payout=%d", ErrProductTreasuryFunds, product.TreasuryBalance, payout)
-			}
-			product.TreasuryBalance -= payout
-			challenge.BonusPayout = bonus
-
-			challengerAccount, ok := state[challenge.Challenger]
+			challengerAccount, ok := state[updatedChallenge.Challenger]
 			if !ok {
 				challengerAccount = &Account{}
-				state[challenge.Challenger] = challengerAccount
+				state[updatedChallenge.Challenger] = challengerAccount
 			}
 			nextBalance := challengerAccount.Balance + payout
 			if nextBalance < challengerAccount.Balance {
 				return errors.New("challenger balance overflow")
 			}
 			challengerAccount.Balance = nextBalance
+			product.TreasuryBalance -= payout
+			updatedChallenge.Open = false
+			updatedChallenge.Successful = true
+			updatedChallenge.Resolver = tx.From
+			updatedChallenge.ResolvedMs = tx.Timestamp
+		} else if finalizeReject {
+			updatedChallenge.Open = false
+			updatedChallenge.Successful = false
+			updatedChallenge.Resolver = tx.From
+			updatedChallenge.ResolvedMs = tx.Timestamp
+			updatedChallenge.SlashBasisPoints = 0
+			updatedChallenge.BonusPayout = 0
 		}
 
-		product.Challenges[challengeID] = challenge
-		delete(product.OpenChallenges, challenge.ProofID)
+		product.Challenges[challengeID] = &updatedChallenge
+		if !updatedChallenge.Open {
+			delete(product.OpenChallenges, updatedChallenge.ProofID)
+		}
 		from.Balance -= tx.Fee
 		from.Nonce++
 		return nil
@@ -1842,12 +2206,13 @@ func (c *Chain) validatorApprovesLocked(v *Validator, block Block) bool {
 	workingDelegations := c.cloneDelegations(c.delegations)
 	workingProduct := c.cloneProductExecutionStateLocked()
 	workingEpoch := c.currentEpoch
+	expireProductStateAtHeight(workingProduct, block.Height, block.Timestamp)
 	var fees uint64
 	for _, tx := range block.Transactions {
 		if err := c.validateTxBasic(tx); err != nil {
 			return false
 		}
-		if err := applyTx(working, workingValidators, workingDelegations, workingProduct, tx, block.Height, c.minJailBlocks, workingEpoch, c.productChallengeMinBond); err != nil {
+		if err := applyTx(working, workingValidators, workingDelegations, workingProduct, tx, block.Height, c.minJailBlocks, workingEpoch, c.productChallengeMinBond, c.productOracleQuorumBps, c.productChallengeResolveDelayBlocks, c.productAttestationTTLBlocks, c.productChallengeMaxOpenBlocks); err != nil {
 			return false
 		}
 		fees += tx.Fee
@@ -1929,6 +2294,7 @@ func (c *Chain) applyBlockToStateLocked(block Block) (map[Address]*Account, map[
 	workingDelegations := c.cloneDelegations(c.delegations)
 	workingProduct := c.cloneProductExecutionStateLocked()
 	workingEpoch := c.currentEpoch
+	expireProductStateAtHeight(workingProduct, block.Height, block.Timestamp)
 	includedIDs := make(map[string]struct{}, len(block.Transactions))
 	var fees uint64
 
@@ -1936,7 +2302,7 @@ func (c *Chain) applyBlockToStateLocked(block Block) (map[Address]*Account, map[
 		if err := c.validateTxBasic(tx); err != nil {
 			return nil, nil, nil, nil, 0, nil, 0, fmt.Errorf("invalid block transaction: %w", err)
 		}
-		if err := applyTx(working, workingValidators, workingDelegations, workingProduct, tx, block.Height, c.minJailBlocks, workingEpoch, c.productChallengeMinBond); err != nil {
+		if err := applyTx(working, workingValidators, workingDelegations, workingProduct, tx, block.Height, c.minJailBlocks, workingEpoch, c.productChallengeMinBond, c.productOracleQuorumBps, c.productChallengeResolveDelayBlocks, c.productAttestationTTLBlocks, c.productChallengeMaxOpenBlocks); err != nil {
 			return nil, nil, nil, nil, 0, nil, 0, fmt.Errorf("apply block transaction: %w", err)
 		}
 		includedIDs[tx.ID()] = struct{}{}
@@ -2048,7 +2414,17 @@ func (c *Chain) computeStateRoot(state map[Address]*Account, validators map[stri
 	b.WriteString(fmt.Sprintf("%d;", currentEpoch))
 	b.WriteString("|product|")
 	if product != nil {
-		b.WriteString(fmt.Sprintf("treasury:%d;rewardBps:%d;challengeMinBond:%d;lastRewardEpoch:%d;", product.TreasuryBalance, c.productRewardBps, c.productChallengeMinBond, product.LastRewardEpoch))
+		b.WriteString(fmt.Sprintf(
+			"treasury:%d;rewardBps:%d;challengeMinBond:%d;oracleQuorumBps:%d;challengeResolveDelay:%d;attestationTTL:%d;challengeMaxOpen:%d;lastRewardEpoch:%d;",
+			product.TreasuryBalance,
+			c.productRewardBps,
+			c.productChallengeMinBond,
+			c.productOracleQuorumBps,
+			c.productChallengeResolveDelayBlocks,
+			c.productAttestationTTLBlocks,
+			c.productChallengeMaxOpenBlocks,
+			product.LastRewardEpoch,
+		))
 		rewardIDs := make([]string, 0, len(product.LastRewards))
 		for validatorID := range product.LastRewards {
 			rewardIDs = append(rewardIDs, validatorID)
@@ -2080,7 +2456,54 @@ func (c *Chain) computeStateRoot(state map[Address]*Account, validators map[stri
 			if proof == nil {
 				continue
 			}
-			b.WriteString(fmt.Sprintf("%s:%s:%s:%d:%d:%d:%d:%t:%t:%s;", proof.ID, proof.Reporter, proof.ValidatorID, proof.Units, proof.QualityBps, proof.Score, proof.Epoch, proof.Challenged, proof.Invalidated, proof.ChallengeID))
+			b.WriteString(fmt.Sprintf(
+				"%s:%s:%s:%d:%d:%d:%d:%d:%d:%t:%t:%s;",
+				proof.ID,
+				proof.Reporter,
+				proof.ValidatorID,
+				proof.Units,
+				proof.QualityBps,
+				proof.Score,
+				proof.Epoch,
+				proof.Attestations,
+				proof.AttestedStake,
+				proof.Challenged,
+				proof.Invalidated,
+				proof.ChallengeID,
+			))
+		}
+
+		pendingIDs := make([]string, 0, len(product.PendingAttestations))
+		for id := range product.PendingAttestations {
+			pendingIDs = append(pendingIDs, id)
+		}
+		sort.Strings(pendingIDs)
+		b.WriteString(";pendingAttestations:")
+		for _, id := range pendingIDs {
+			pending := product.PendingAttestations[id]
+			if pending == nil {
+				continue
+			}
+			b.WriteString(fmt.Sprintf(
+				"%s:%s:%s:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:",
+				pending.ID,
+				pending.ProofRef,
+				pending.ValidatorID,
+				pending.Units,
+				pending.QualityBps,
+				pending.Score,
+				pending.Epoch,
+				pending.RequiredStake,
+				pending.CollectedStake,
+				pending.CreatedHeight,
+				pending.ExpiresHeight,
+				pending.CreatedMs,
+				pending.LastUpdatedMs,
+			))
+			for _, vote := range pending.Votes {
+				b.WriteString(fmt.Sprintf("%s:%s:%d:%d,", vote.Oracle, vote.OracleValidatorID, vote.Stake, vote.Timestamp))
+			}
+			b.WriteString(";")
 		}
 
 		challengeIDs := make([]string, 0, len(product.Challenges))
@@ -2094,7 +2517,43 @@ func (c *Chain) computeStateRoot(state map[Address]*Account, validators map[stri
 			if challenge == nil {
 				continue
 			}
-			b.WriteString(fmt.Sprintf("%s:%s:%s:%d:%t:%t:%s:%d:%d:%d:%d;", challenge.ID, challenge.ProofID, challenge.Challenger, challenge.Bond, challenge.Open, challenge.Successful, challenge.Resolver, challenge.SlashBasisPoints, challenge.BonusPayout, challenge.CreatedMs, challenge.ResolvedMs))
+			b.WriteString(fmt.Sprintf(
+				"%s:%s:%s:%d:%d:%d:%d:%d:%d:%d:%t:%t:%s:%d:%d:%d:%d:",
+				challenge.ID,
+				challenge.ProofID,
+				challenge.Challenger,
+				challenge.Bond,
+				challenge.CreatedHeight,
+				challenge.ResolveAfterHeight,
+				challenge.MaxOpenHeight,
+				challenge.RequiredStake,
+				challenge.AcceptedStake,
+				challenge.RejectedStake,
+				challenge.Open,
+				challenge.Successful,
+				challenge.Resolver,
+				challenge.SlashBasisPoints,
+				challenge.BonusPayout,
+				challenge.CreatedMs,
+				challenge.ResolvedMs,
+			))
+			for _, vote := range challenge.Votes {
+				approveFlag := 0
+				if vote.Approve {
+					approveFlag = 1
+				}
+				b.WriteString(fmt.Sprintf(
+					"%s:%s:%d:%d:%d:%d:%d,",
+					vote.Oracle,
+					vote.OracleValidatorID,
+					approveFlag,
+					vote.Stake,
+					vote.Timestamp,
+					vote.SlashBasisPoints,
+					vote.BonusPayout,
+				))
+			}
+			b.WriteString(";")
 		}
 
 		settlementIDs := make([]string, 0, len(product.Settlements))
@@ -2146,26 +2605,30 @@ func (c *Chain) cloneDelegations(src map[string]*Delegation) map[string]*Delegat
 }
 
 type productExecutionState struct {
-	TreasuryBalance uint64
-	Proofs          map[string]*ProductProof
-	Challenges      map[string]*ProductChallenge
-	OpenChallenges  map[string]string
-	Settlements     map[string]*ProductSettlement
-	SignalScore     map[string]uint64
-	LastRewardEpoch uint64
-	LastRewards     map[string]uint64
+	TreasuryBalance     uint64
+	Proofs              map[string]*ProductProof
+	PendingAttestations map[string]*ProductPendingAttestation
+	Challenges          map[string]*ProductChallenge
+	OpenChallenges      map[string]string
+	Settlements         map[string]*ProductSettlement
+	SettlementRefs      map[string]string
+	SignalScore         map[string]uint64
+	LastRewardEpoch     uint64
+	LastRewards         map[string]uint64
 }
 
 func (c *Chain) cloneProductExecutionStateLocked() *productExecutionState {
 	cloned := &productExecutionState{
-		TreasuryBalance: c.productTreasuryBalance,
-		Proofs:          make(map[string]*ProductProof, len(c.productProofs)),
-		Challenges:      make(map[string]*ProductChallenge, len(c.productChallenges)),
-		OpenChallenges:  make(map[string]string, len(c.productOpenChallenges)),
-		Settlements:     make(map[string]*ProductSettlement, len(c.productSettlements)),
-		SignalScore:     make(map[string]uint64, len(c.productSignalScore)),
-		LastRewardEpoch: c.lastProductRewardEpoch,
-		LastRewards:     make(map[string]uint64, len(c.lastProductRewards)),
+		TreasuryBalance:     c.productTreasuryBalance,
+		Proofs:              make(map[string]*ProductProof, len(c.productProofs)),
+		PendingAttestations: make(map[string]*ProductPendingAttestation, len(c.productPendingAttestations)),
+		Challenges:          make(map[string]*ProductChallenge, len(c.productChallenges)),
+		OpenChallenges:      make(map[string]string, len(c.productOpenChallenges)),
+		Settlements:         make(map[string]*ProductSettlement, len(c.productSettlements)),
+		SettlementRefs:      make(map[string]string, len(c.productSettlementRefs)),
+		SignalScore:         make(map[string]uint64, len(c.productSignalScore)),
+		LastRewardEpoch:     c.lastProductRewardEpoch,
+		LastRewards:         make(map[string]uint64, len(c.lastProductRewards)),
 	}
 	for id, proof := range c.productProofs {
 		if proof == nil {
@@ -2174,11 +2637,24 @@ func (c *Chain) cloneProductExecutionStateLocked() *productExecutionState {
 		copied := *proof
 		cloned.Proofs[id] = &copied
 	}
+	for id, pending := range c.productPendingAttestations {
+		if pending == nil {
+			continue
+		}
+		copied := *pending
+		if len(pending.Votes) > 0 {
+			copied.Votes = append([]ProductAttestationVote(nil), pending.Votes...)
+		}
+		cloned.PendingAttestations[id] = &copied
+	}
 	for id, challenge := range c.productChallenges {
 		if challenge == nil {
 			continue
 		}
 		copied := *challenge
+		if len(challenge.Votes) > 0 {
+			copied.Votes = append([]ProductChallengeVote(nil), challenge.Votes...)
+		}
 		cloned.Challenges[id] = &copied
 	}
 	for proofID, challengeID := range c.productOpenChallenges {
@@ -2190,6 +2666,9 @@ func (c *Chain) cloneProductExecutionStateLocked() *productExecutionState {
 		}
 		copied := *settlement
 		cloned.Settlements[id] = &copied
+	}
+	for key, settlementID := range c.productSettlementRefs {
+		cloned.SettlementRefs[key] = settlementID
 	}
 	for validatorID, score := range c.productSignalScore {
 		cloned.SignalScore[validatorID] = score
@@ -2257,6 +2736,7 @@ func (c *Chain) applyEpochTransitionIfNeededLocked(
 	if err := c.distributeProductRewardsAtEpochTransitionLocked(state, validators, product, *currentEpoch); err != nil {
 		return err
 	}
+	c.prunePendingAttestationsAtEpochLocked(product, *currentEpoch)
 
 	*currentEpoch = addClampUint64(*currentEpoch, 1)
 	_ = delegations
@@ -2347,6 +2827,62 @@ func (c *Chain) distributeProductRewardsAtEpochTransitionLocked(
 	return nil
 }
 
+func (c *Chain) prunePendingAttestationsAtEpochLocked(product *productExecutionState, epoch uint64) {
+	if product == nil || len(product.PendingAttestations) == 0 {
+		return
+	}
+	for proofID, pending := range product.PendingAttestations {
+		if pending == nil {
+			delete(product.PendingAttestations, proofID)
+			continue
+		}
+		if pending.Epoch <= epoch {
+			delete(product.PendingAttestations, proofID)
+		}
+	}
+}
+
+func expireProductStateAtHeight(product *productExecutionState, evalHeight uint64, nowMs int64) {
+	if product == nil {
+		return
+	}
+	if len(product.PendingAttestations) > 0 {
+		for proofID, pending := range product.PendingAttestations {
+			if pending == nil {
+				delete(product.PendingAttestations, proofID)
+				continue
+			}
+			if pending.ExpiresHeight > 0 && evalHeight >= pending.ExpiresHeight {
+				delete(product.PendingAttestations, proofID)
+			}
+		}
+	}
+	if len(product.Challenges) > 0 {
+		for challengeID, challenge := range product.Challenges {
+			if challenge == nil {
+				delete(product.Challenges, challengeID)
+				continue
+			}
+			if !challenge.Open {
+				continue
+			}
+			if challenge.MaxOpenHeight == 0 || evalHeight < challenge.MaxOpenHeight {
+				continue
+			}
+			challenge.Open = false
+			challenge.Successful = false
+			challenge.Resolver = Address("system-timeout")
+			if nowMs > 0 {
+				challenge.ResolvedMs = nowMs
+			} else {
+				challenge.ResolvedMs = challenge.CreatedMs
+			}
+			product.Challenges[challengeID] = challenge
+			delete(product.OpenChallenges, challenge.ProofID)
+		}
+	}
+}
+
 func (c *Chain) rebuildMempoolLocked(excluded map[string]struct{}) {
 	state := c.cloneAccounts(c.accounts)
 	validators := c.cloneValidators(c.validators)
@@ -2369,7 +2905,7 @@ func (c *Chain) rebuildMempoolLocked(excluded map[string]struct{}) {
 		if err := c.validateTxBasic(tx); err != nil {
 			continue
 		}
-		if err := applyTx(state, validators, delegations, product, tx, nextHeight, c.minJailBlocks, c.currentEpoch, c.productChallengeMinBond); err != nil {
+		if err := applyTx(state, validators, delegations, product, tx, nextHeight, c.minJailBlocks, c.currentEpoch, c.productChallengeMinBond, c.productOracleQuorumBps, c.productChallengeResolveDelayBlocks, c.productAttestationTTLBlocks, c.productChallengeMaxOpenBlocks); err != nil {
 			continue
 		}
 		filtered = append(filtered, tx)
@@ -2504,7 +3040,7 @@ func (c *Chain) canApplyMempoolLocked(pool []Transaction) bool {
 		if err := c.validateTxBasic(tx); err != nil {
 			return false
 		}
-		if err := applyTx(state, validators, delegations, product, tx, nextHeight, c.minJailBlocks, c.currentEpoch, c.productChallengeMinBond); err != nil {
+		if err := applyTx(state, validators, delegations, product, tx, nextHeight, c.minJailBlocks, c.currentEpoch, c.productChallengeMinBond, c.productOracleQuorumBps, c.productChallengeResolveDelayBlocks, c.productAttestationTTLBlocks, c.productChallengeMaxOpenBlocks); err != nil {
 			return false
 		}
 	}
@@ -2589,6 +3125,94 @@ func validatorIDByAddress(validators map[string]*Validator, addr Address) (strin
 		return id, true
 	}
 	return "", false
+}
+
+func productProofID(proofRef string, validatorID string, units uint64, qualityBps uint64, epoch uint64) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%d|%d|%d", proofRef, validatorID, units, qualityBps, epoch)))
+	return hex.EncodeToString(sum[:])
+}
+
+func settlementReferenceKey(payer Address, reference string) string {
+	return fmt.Sprintf("%s|%s", payer, reference)
+}
+
+func delegationTotalsByValidator(delegations map[string]*Delegation) map[string]uint64 {
+	totals := make(map[string]uint64)
+	for _, delegation := range delegations {
+		if delegation == nil || delegation.Amount == 0 {
+			continue
+		}
+		totals[delegation.ValidatorID] = addClampUint64(totals[delegation.ValidatorID], delegation.Amount)
+	}
+	return totals
+}
+
+func effectiveStakeForValidator(v *Validator, delegated uint64) uint64 {
+	if v == nil || !v.Active || v.Jailed || v.WorkWeight == 0 {
+		return 0
+	}
+	totalStake := addClampUint64(v.Stake, delegated)
+	if totalStake == 0 {
+		return 0
+	}
+	product := totalStake * v.WorkWeight
+	if v.WorkWeight != 0 && product/v.WorkWeight != totalStake {
+		product = ^uint64(0)
+	}
+	effective := product / 100
+	if effective == 0 {
+		return 1
+	}
+	return effective
+}
+
+func quorumStakeRequired(totalStake uint64, quorumBps uint64) uint64 {
+	if totalStake == 0 {
+		return 0
+	}
+	if quorumBps == 0 {
+		quorumBps = defaultProductOracleQuorumBps
+	}
+	if quorumBps > 10_000 {
+		quorumBps = 10_000
+	}
+	whole := (totalStake / 10_000) * quorumBps
+	rem := (totalStake % 10_000) * quorumBps
+	if rem == 0 {
+		if whole == 0 {
+			return 1
+		}
+		return whole
+	}
+	required := addClampUint64(whole, (rem+9_999)/10_000)
+	if required == 0 {
+		return 1
+	}
+	return required
+}
+
+func oracleQuorumStake(validators map[string]*Validator, delegations map[string]*Delegation, quorumBps uint64) (required uint64, total uint64) {
+	delegated := delegationTotalsByValidator(delegations)
+	for _, validator := range validators {
+		total = addClampUint64(total, effectiveStakeForValidator(validator, delegated[validator.ID]))
+	}
+	required = quorumStakeRequired(total, quorumBps)
+	return required, total
+}
+
+func oracleEffectiveStakeByAddress(validators map[string]*Validator, delegations map[string]*Delegation, addr Address) (validatorID string, stake uint64, ok bool) {
+	delegated := delegationTotalsByValidator(delegations)
+	for id, validator := range validators {
+		if validator == nil || validator.Address != addr {
+			continue
+		}
+		stake = effectiveStakeForValidator(validator, delegated[id])
+		if stake == 0 {
+			return "", 0, false
+		}
+		return id, stake, true
+	}
+	return "", 0, false
 }
 
 func productSignalScore(units uint64, qualityBps uint64) uint64 {

@@ -7,15 +7,17 @@ This document describes the initial product-economics integration added to `fast
 1. `product_settle`
 - Purpose: user payment into product treasury.
 - Required fields: `from`, `to` (product reference), `amount`, `fee`, `nonce`, `timestamp`.
+- Rules:
+  - `to` (reference) must be unique per payer (`from`) to avoid duplicate charges.
 - Effect: `amount` moves from payer balance to product treasury.
 
 2. `product_attest`
 - Purpose: oracle/validator attestation of completed product work.
 - Required fields: `from` (oracle signer), `to` (proof reference), `validatorId`, `amount` (work units), `basisPoints` (quality), `fee`, `nonce`, `timestamp`.
 - Effect:
-  - stores a `ProductProof`
-  - updates product signal score for the attested validator
-  - updates attested validator `workWeight` via smoothing rule
+  - records a stake-weighted attestation vote under a deterministic proof id
+  - finalizes `ProductProof` only when oracle quorum is reached (`productOracleQuorumBps`)
+  - on finalization: updates product signal score and attested validator `workWeight`
 
 3. `product_challenge`
 - Purpose: challenge an attested proof with an economic bond.
@@ -26,13 +28,17 @@ This document describes the initial product-economics integration added to `fast
   - moves challenge bond into treasury escrow
 
 4. `product_resolve_challenge`
-- Purpose: oracle resolution for an open challenge.
+- Purpose: oracle vote for challenge resolution (stake-weighted quorum).
 - Required fields: `from`, `to` (challenge id), `fee`, `nonce`, `timestamp`.
 - Optional fields:
   - `basisPoints`:
     - `0` means challenge rejected
     - `>0` means challenge accepted and validator slash basis points
-  - `amount`: optional challenger bonus payout when accepted
+  - `amount`: optional challenger bonus payout when accepted (`basisPoints > 0`)
+- Rules:
+  - challenge cannot be resolved before `resolveAfterHeight` (`productChallengeResolveDelayBlocks`)
+  - each oracle can vote once per challenge
+  - accepted votes must agree on slash/bonus parameters
 - Effect on accepted challenge:
   - proof is invalidated
   - validator is slashed and jailed
@@ -42,7 +48,7 @@ This document describes the initial product-economics integration added to `fast
 
 Stored per attestation as `ProductProof`:
 
-- `id` (tx id)
+- `id` (deterministic proof id)
 - `proofRef` (external proof hash/reference)
 - `reporter` (oracle address)
 - `validatorId`
@@ -51,9 +57,30 @@ Stored per attestation as `ProductProof`:
 - `score`
 - `epoch`
 - `timestamp`
+- `attestations` (oracle vote count used to finalize)
+- `attestedStake` (oracle stake accumulated at finalization)
 - `challenged`
 - `invalidated`
 - `challengeId`
+
+## Pending Attestation Schema
+
+Stored for in-progress proofs as `ProductPendingAttestation`:
+
+- `id`
+- `proofRef`
+- `validatorId`
+- `units`
+- `qualityBps`
+- `score`
+- `epoch`
+- `requiredStake`
+- `collectedStake`
+- `createdHeight`
+- `expiresHeight`
+- `createdMs`
+- `lastUpdatedMs`
+- `votes[]` (`oracle`, `oracleValidatorId`, `stake`, `timestamp`)
 
 ## Product Challenge Schema
 
@@ -63,6 +90,13 @@ Stored per challenge as `ProductChallenge`:
 - `proofId`
 - `challenger`
 - `bond`
+- `createdHeight`
+- `resolveAfterHeight`
+- `maxOpenHeight`
+- `requiredStake`
+- `acceptedStake`
+- `rejectedStake`
+- `votes[]` (`oracle`, `oracleValidatorId`, `approve`, `stake`, `timestamp`, `slashBasisPoints`, `bonusPayout`)
 - `open`
 - `successful`
 - `resolver`
@@ -97,20 +131,25 @@ Stored per settlement as `ProductSettlement`:
 Read endpoints:
 
 - `GET /product/status`
-- `GET /product/proofs`
-- `GET /product/challenges`
-- `GET /product/settlements`
+- `GET /product/proofs` (`?id=...&proofRef=...&validatorId=...&reporter=...&epoch=...&minScore=...&maxScore=...&includeInvalid=true|false&offset=...&limit=...&withMeta=true|false`)
+- `GET /product/attestations/stats` (`?id=...&proofId=...&proofRef=...&validatorId=...&epoch=...&minCollectedStake=...&sinceMs=...&untilMs=...`; aggregate pending-attestation count/stake/progress by validator)
+- `GET /product/attestations/pending` (`?id=...&proofId=...&proofRef=...&validatorId=...&epoch=...&minCollectedStake=...&sinceMs=...&untilMs=...&offset=...&limit=...&withMeta=true|false`)
+- `GET /product/challenges` (`?id=...&proofId=...&challenger=...&resolver=...&successful=true|false&openOnly=true|false&minBond=...&sinceMs=...&untilMs=...&offset=...&limit=...&withMeta=true|false`)
+- `GET /product/challenges/stats` (`?id=...&proofId=...&challenger=...&resolver=...&successful=true|false&openOnly=true|false&minBond=...&sinceMs=...&untilMs=...`; aggregate totals + grouped challenger/resolver bond stats)
+- `GET /product/settlements` (`?id=...&reference=...&payer=...&validatorId=...&epoch=...&minAmount=...&maxAmount=...&sinceMs=...&untilMs=...&offset=...&limit=...&withMeta=true|false`)
+- `GET /product/settlements/lookup` (`?payer=...&reference=...&includePending=true|false`; returns `state=finalized` + `settlement` or `state=pending` + `txId` when enabled)
+- `GET /product/settlements/stats` (`?id=...&reference=...&payer=...&validatorId=...&epoch=...&minAmount=...&maxAmount=...&sinceMs=...&untilMs=...`; aggregate totals grouped by validator/epoch)
 - `GET /product/billing/quote?units=...`
 
 Submit endpoints (pre-signed tx JSON):
 
-- `POST /product/settlements`
-- `POST /product/attestations`
-- `POST /product/challenges`
-- `POST /product/challenges/resolve`
+- `POST /product/settlements` (`?idempotent=true` optional for duplicate payer/reference retries)
+- `POST /product/attestations` (`?idempotent=true` optional for duplicate oracle vote retries)
+- `POST /product/challenges` (`?idempotent=true` optional for duplicate challenge retries)
+- `POST /product/challenges/resolve` (`?idempotent=true` optional for duplicate resolve-vote retries)
 
 ## Current Trust Model (Initial)
 
 - Oracle authority is represented by active non-jailed validator signers.
+- Oracle actions are now gated by stake-weighted quorum for both proof finalization and challenge outcomes.
 - This keeps behavior deterministic and decentralized under existing validator assumptions.
-- A future upgrade can add dedicated oracle sets or threshold attestations.
