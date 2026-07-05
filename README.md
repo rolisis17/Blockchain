@@ -1,20 +1,45 @@
 # fastpos
 
-Simplified proof-of-stake blockchain node written in Go. The project is designed as a practical sandbox for validator logic, transaction handling, peer messaging, persistence, and product-integration flows before real production hardening.
+`fastpos` is a simplified proof-of-stake blockchain node written in Go. It is built as a practical sandbox for consensus, validator behavior, transaction processing, persistence, peer messaging, and product-facing settlement flows.
 
-## Highlights
+The project is not presented as a production chain. Its value is in making blockchain mechanics concrete and inspectable: keys, signatures, mempool rules, validator voting, finality, slashing, state recovery, and application-level transaction types all live in one Go codebase.
 
-- Signed account transfers with Ed25519
-- Stake-weighted proposer selection and validator voting
-- Mempool controls for fee replacement, size limits, pending caps, and expiry
-- Snapshot or SQLite-backed persistent state
-- Configurable genesis and node runtime
-- HTTP health, readiness, metrics, transaction, validator, and product APIs
-- Signed peer-to-peer envelopes and static peer gossip
-- Multi-node testnet configs for local and Docker runs
-- Validator lifecycle, delegation, slashing, jailing, and epoch transitions
-- Product settlement, attestation, challenge, fraud-resolution, and treasury reward flows
-- Unit, integration, and fuzz tests around consensus, persistence, p2p, and transaction logic
+## What it does
+
+- Runs a configurable blockchain node over HTTP
+- Supports signed account transfers with Ed25519
+- Selects proposers using effective validator stake
+- Finalizes blocks through validator voting
+- Tracks validator lifecycle actions such as bond, unbond, slash, jail, and unjail
+- Supports delegation and epoch-based validator-set updates
+- Enforces mempool limits, minimum fees, replacement rules, pending caps, and transaction expiry
+- Persists state through snapshot JSON or SQLite
+- Exposes health, readiness, metrics, transaction, validator, and product APIs
+- Sends signed peer-to-peer envelopes between nodes
+- Supports static peer gossip and startup synchronization
+- Includes product settlement, attestation, challenge, and reward-distribution transaction flows
+
+## Why it is interesting
+
+This repository goes beyond a toy transfer ledger. It explores how chain-level mechanics connect to real product requirements:
+
+- idempotent settlement submission
+- pending attestations
+- challenge windows
+- fraud-resolution flow
+- oracle quorum thresholds
+- product treasury and reward accounting
+- finalized transaction queries for reconciliation
+
+That makes it useful as a learning system for both consensus internals and application-facing blockchain design.
+
+## Tech stack
+
+- Go
+- SQLite optional state backend
+- YAML/JSON configuration
+- Docker Compose testnet
+- Go unit, integration, and fuzz tests
 
 ## Quick start
 
@@ -24,7 +49,7 @@ Run a single node with defaults:
 go run ./cmd/node
 ```
 
-Run with an example config:
+Run with the example config:
 
 ```bash
 go run ./cmd/node -config ./configs/node.example.yaml
@@ -36,27 +61,57 @@ Run the Docker testnet:
 docker compose -f docker-compose.testnet.yml up
 ```
 
-## Useful commands
+## Wallet helper
+
+Generate a wallet:
+
+```bash
+go run ./cmd/wallet gen
+```
+
+Sign a transaction:
+
+```bash
+go run ./cmd/wallet sign -priv <private-key> -to <address> -amount 10 -nonce 1
+```
+
+## Tests
 
 ```bash
 go test ./...
-go run ./cmd/wallet
-go run ./cmd/node -config ./configs/testnet/local/node1.yaml
 ```
 
 ## Repository structure
 
 ```text
-cmd/node/        Node runtime, config, backup, sync, migration
-cmd/wallet/      Wallet helper
+cmd/node/        Node runtime, config, backup, sync, and migration
+cmd/wallet/      Wallet generation and transaction signing helper
 configs/         Genesis and node/testnet configuration
 docs/            Protocol, recovery, product, and threat-model notes
-internal/chain/  Chain state, consensus, tx types, persistence
-internal/node/   HTTP server
+internal/chain/  Chain state, consensus, tx types, persistence, tests
+internal/node/   HTTP server and API layer
 internal/p2p/    P2P message and service layer
 scripts/         Testnet and operations scripts
 ```
 
+## Technical highlights
+
+- Clear separation between chain logic, HTTP node API, and P2P service
+- Config precedence through defaults, config file, and CLI flags
+- Durable restart behavior through persistent state backends
+- Multi-node local/Docker testnet configuration
+- Tests around consensus, persistence, mempool, replay protection, validator lifecycle, and P2P messages
+- Fuzz tests for consensus and signed envelope handling
+
+## Skills demonstrated
+
+- Go systems programming
+- Consensus and validator-state modeling
+- Cryptographic transaction signing
+- API design for chain state and product workflows
+- Persistence and recovery design
+- Threat modeling and protocol documentation
+
 ## Status
 
-This is a pre-production research and implementation project. It is intentionally explicit and test-heavy so the consensus and product-flow behavior can be inspected, challenged, and improved.
+This is a pre-production research and implementation project. It is built to be read, tested, challenged, and improved.
